@@ -44,9 +44,9 @@ public class PlayerPositionListener {
             return;
         }
         // Prevent the player from moving during a teleport
-        if (player.getLastSentTeleportId() != player.getLastReceivedTeleportId()) {
-            return;
-        }
+//        if (player.getLastSentTeleportId() != player.getLastReceivedTeleportId()) {
+//            return;
+//        }
         // Try to move in an unloaded chunk, prevent it
         if (!currentPosition.sameChunk(packetPosition) && !ChunkUtils.isLoaded(instance, packetPosition)) {
             player.teleport(currentPosition);

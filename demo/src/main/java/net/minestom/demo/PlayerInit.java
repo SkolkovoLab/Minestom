@@ -2,15 +2,11 @@ package net.minestom.demo;
 
 import net.kyori.adventure.text.Component;
 import net.minestom.server.MinecraftServer;
-import net.minestom.server.advancements.FrameType;
-import net.minestom.server.advancements.notifications.Notification;
-import net.minestom.server.advancements.notifications.NotificationCenter;
 import net.minestom.server.adventure.MinestomAdventure;
 import net.minestom.server.adventure.audience.Audiences;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
 import net.minestom.server.entity.Entity;
-import net.minestom.server.entity.GameMode;
 import net.minestom.server.entity.ItemEntity;
 import net.minestom.server.entity.Player;
 import net.minestom.server.entity.damage.Damage;
@@ -30,7 +26,6 @@ import net.minestom.server.inventory.Inventory;
 import net.minestom.server.inventory.InventoryType;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
-import net.minestom.server.item.metadata.BundleMeta;
 import net.minestom.server.monitoring.BenchmarkManager;
 import net.minestom.server.monitoring.TickMonitor;
 import net.minestom.server.utils.MathUtils;
@@ -39,7 +34,6 @@ import net.minestom.server.world.DimensionType;
 
 import java.time.Duration;
 import java.util.Random;
-import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -95,33 +89,33 @@ public class PlayerInit {
                 player.setRespawnPoint(new Pos(0, 40f, 0));
             })
             .addListener(PlayerSpawnEvent.class, event -> {
-                final Player player = event.getPlayer();
-                player.setGameMode(GameMode.CREATIVE);
-                player.setPermissionLevel(4);
-                ItemStack itemStack = ItemStack.builder(Material.STONE)
-                        .amount(64)
-                        .meta(itemMetaBuilder ->
-                                itemMetaBuilder.canPlaceOn(Set.of(Block.STONE))
-                                        .canDestroy(Set.of(Block.DIAMOND_ORE)))
-                        .build();
-                player.getInventory().addItemStack(itemStack);
-
-                ItemStack bundle = ItemStack.builder(Material.BUNDLE)
-                        .meta(BundleMeta.class, bundleMetaBuilder -> {
-                            bundleMetaBuilder.addItem(ItemStack.of(Material.DIAMOND, 5));
-                            bundleMetaBuilder.addItem(ItemStack.of(Material.RABBIT_FOOT, 5));
-                        })
-                        .build();
-                player.getInventory().addItemStack(bundle);
-
-                if (event.isFirstSpawn()) {
-                    Notification notification = new Notification(
-                            Component.text("Welcome!"),
-                            FrameType.TASK,
-                            Material.IRON_SWORD
-                    );
-                    NotificationCenter.send(notification, event.getPlayer());
-                }
+//                final Player player = event.getPlayer();
+//                player.setGameMode(GameMode.CREATIVE);
+//                player.setPermissionLevel(4);
+//                ItemStack itemStack = ItemStack.builder(Material.STONE)
+//                        .amount(64)
+//                        .meta(itemMetaBuilder ->
+//                                itemMetaBuilder.canPlaceOn(Set.of(Block.STONE))
+//                                        .canDestroy(Set.of(Block.DIAMOND_ORE)))
+//                        .build();
+//                player.getInventory().addItemStack(itemStack);
+//
+//                ItemStack bundle = ItemStack.builder(Material.BUNDLE)
+//                        .meta(BundleMeta.class, bundleMetaBuilder -> {
+//                            bundleMetaBuilder.addItem(ItemStack.of(Material.DIAMOND, 5));
+//                            bundleMetaBuilder.addItem(ItemStack.of(Material.RABBIT_FOOT, 5));
+//                        })
+//                        .build();
+//                player.getInventory().addItemStack(bundle);
+//
+//                if (event.isFirstSpawn()) {
+//                    Notification notification = new Notification(
+//                            Component.text("Welcome!"),
+//                            FrameType.TASK,
+//                            Material.IRON_SWORD
+//                    );
+//                    NotificationCenter.send(notification, event.getPlayer());
+//                }
             })
             .addListener(PlayerPacketOutEvent.class, event -> {
                 //System.out.println("out " + event.getPacket().getClass().getSimpleName());
@@ -161,7 +155,7 @@ public class PlayerInit {
 
         InstanceContainer instanceContainer = instanceManager.createInstanceContainer(DimensionType.OVERWORLD);
         instanceContainer.setGenerator(unit -> {
-            unit.modifier().fillHeight(0, 40, Block.STONE);
+            unit.modifier().fillHeight(39, 40, Block.STONE);
 
             if (unit.absoluteStart().blockY() < 40 && unit.absoluteEnd().blockY() > 40) {
                 unit.modifier().setBlock(unit.absoluteStart().blockX(), 40, unit.absoluteStart().blockZ(), Block.TORCH);
@@ -189,6 +183,22 @@ public class PlayerInit {
 
         inventory = new Inventory(InventoryType.CHEST_1_ROW, Component.text("Test inventory"));
         inventory.setItemStack(3, ItemStack.of(Material.DIAMOND, 34));
+    }
+
+    static {
+        InstanceManager instanceManager = MinecraftServer.getInstanceManager();
+
+        InstanceContainer instanceContainer = instanceManager.createInstanceContainer(DimensionType.OVERWORLD);
+        instanceContainer.setGenerator(unit -> {
+            unit.modifier().fillHeight(39, 40, Block.OAK_PLANKS);
+
+            if (unit.absoluteStart().blockY() < 40 && unit.absoluteEnd().blockY() > 40) {
+                unit.modifier().setBlock(unit.absoluteStart().blockX(), 40, unit.absoluteStart().blockZ(), Block.TORCH);
+            }
+        });
+        instanceContainer.setChunkSupplier(LightingChunk::new);
+        instanceContainer.setTimeRate(0);
+        instanceContainer.setTime(18000);
     }
 
     private static final AtomicReference<TickMonitor> LAST_TICK = new AtomicReference<>();

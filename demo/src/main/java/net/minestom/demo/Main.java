@@ -10,10 +10,14 @@ import net.minestom.demo.block.placement.DripstonePlacementRule;
 import net.minestom.demo.commands.*;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.command.CommandManager;
+import net.minestom.server.coordinate.Pos;
 import net.minestom.server.entity.Player;
+import net.minestom.server.event.player.PlayerSwapItemEvent;
 import net.minestom.server.event.server.ServerListPingEvent;
+import net.minestom.server.event.server.ServerTickMonitorEvent;
 import net.minestom.server.extras.lan.OpenToLAN;
 import net.minestom.server.extras.lan.OpenToLANConfig;
+import net.minestom.server.instance.Instance;
 import net.minestom.server.instance.block.BlockManager;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
@@ -27,8 +31,16 @@ import org.jetbrains.annotations.NotNull;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Random;
 
 public class Main {
+
+    private static Random random = new Random();
+
+    private static double randomCoord() {
+        return random.nextDouble(-1000, 1000);
+//        return random.nextInt(-100, 100) * 16;
+    }
 
     public static void main(String[] args) {
         System.setProperty("minestom.experiment.pose-updates", "true");
@@ -81,6 +93,20 @@ public class Main {
         MinecraftServer.getBenchmarkManager().enable(Duration.of(10, TimeUnit.SECOND));
 
         MinecraftServer.getSchedulerManager().buildShutdownTask(() -> System.out.println("Good night"));
+
+        MinecraftServer.getGlobalEventHandler().addListener(PlayerSwapItemEvent.class, (ev) -> {
+            ev.setCancelled(true);
+            var player = ev.getPlayer();
+            var instances = MinecraftServer.getInstanceManager().getInstances();
+            Instance instance = instances.stream().filter((it) -> !it.equals(player.getInstance())).findFirst().get();
+            player.setInstance(instance, new Pos(randomCoord(), 40, randomCoord()));
+        });
+
+        MinecraftServer.getGlobalEventHandler().addListener(ServerTickMonitorEvent.class, (ev) -> {
+            for (Player onlinePlayer : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
+                onlinePlayer.sendActionBar(Component.text(String.format("MSPT: %.2f", ev.getTickMonitor().getTickTime())));
+            }
+        });
 
         MinecraftServer.getGlobalEventHandler().addListener(ServerListPingEvent.class, event -> {
             ResponseData responseData = event.getResponseData();

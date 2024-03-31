@@ -2260,7 +2260,7 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
                 List.of();
         byte hatIndex = ((MetadataDef.Entry.BitMask) MetadataDef.Player.IS_HAT_ENABLED).bitMask();
         return new PlayerInfoUpdatePacket.Entry(getUuid(), getUsername(), prop,
-                true, getLatency(), getGameMode(), displayName, null, 0, (settings.displayedSkinParts() & hatIndex) == hatIndex);
+                false, getLatency(), getGameMode(), displayName, null, 0, (settings.displayedSkinParts() & hatIndex) == hatIndex);
     }
 
     /**

@@ -2220,7 +2220,7 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
                 List.of(new PlayerInfoUpdatePacket.Property("textures", skin.textures(), skin.signature())) :
                 List.of();
         return new PlayerInfoUpdatePacket.Entry(getUuid(), getUsername(), prop,
-                true, getLatency(), getGameMode(), displayName, null, 0);
+                false, getLatency(), getGameMode(), displayName, null, 0);
     }
 
     /**

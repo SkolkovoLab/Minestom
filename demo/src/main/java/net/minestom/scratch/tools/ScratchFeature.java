@@ -4,13 +4,16 @@ import net.kyori.adventure.text.Component;
 import net.minestom.server.coordinate.Point;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.instance.block.BlockFace;
+import net.minestom.server.item.ItemStack;
 import net.minestom.server.network.packet.client.ClientPacket;
 import net.minestom.server.network.packet.client.play.*;
 import net.minestom.server.network.packet.server.ServerPacket;
 import net.minestom.server.network.packet.server.play.*;
 import net.minestom.server.utils.Direction;
 import net.minestom.server.utils.chunk.ChunkUtils;
+import net.minestom.server.utils.inventory.PlayerInventoryUtils;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 public interface ScratchFeature extends Consumer<ClientPacket> {
@@ -146,6 +149,28 @@ public interface ScratchFeature extends Consumer<ClientPacket> {
             void placeBlock(Point point);
 
             void acknowledge(ServerPacket.Play packet);
+        }
+    }
+
+    record InventoryHandling(Mapping mapping) implements ScratchFeature {
+        @Override
+        public void accept(ClientPacket packet) {
+            if (packet instanceof ClientClickWindowPacket(
+                    byte windowId, int stateId, short slot, byte button, ClientClickWindowPacket.ClickType clickType,
+                    List<ClientClickWindowPacket.ChangedSlot> changedSlots, ItemStack clickedItem
+            )) {
+                for (ClientClickWindowPacket.ChangedSlot changedSlot : changedSlots) {
+                    final int internalSlot = PlayerInventoryUtils.convertPlayerInventorySlot(changedSlot.slot(), PlayerInventoryUtils.OFFSET);
+                    mapping.setPlayerItem(internalSlot, changedSlot.item());
+                }
+                mapping.setCursorItem(clickedItem);
+            }
+        }
+
+        public interface Mapping {
+            void setPlayerItem(int slot, ItemStack itemStack);
+
+            void setCursorItem(ItemStack itemStack);
         }
     }
 }

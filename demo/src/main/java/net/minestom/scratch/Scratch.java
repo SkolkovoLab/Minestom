@@ -4,6 +4,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.minestom.scratch.tools.ScratchBlockTools.BlockHolder;
 import net.minestom.scratch.tools.ScratchFeature;
+import net.minestom.scratch.tools.ScratchInventoryUtils;
 import net.minestom.scratch.tools.ScratchNetworkTools.NetworkContext;
 import net.minestom.scratch.tools.ScratchVelocityTools;
 import net.minestom.server.ServerFlag;
@@ -17,6 +18,8 @@ import net.minestom.server.entity.EntityType;
 import net.minestom.server.entity.GameMode;
 import net.minestom.server.instance.WorldBorder;
 import net.minestom.server.instance.block.Block;
+import net.minestom.server.item.ItemStack;
+import net.minestom.server.item.Material;
 import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.packet.client.ClientPacket;
 import net.minestom.server.network.packet.client.common.ClientPingRequestPacket;
@@ -338,14 +341,19 @@ public final class Scratch {
 
         final Instance instance;
         final Synchronizer.Entry synchronizerEntry;
+        GameMode gameMode = GameMode.SURVIVAL;
         Pos position;
         Pos oldPosition;
+
+        ItemStack[] inventory = new ItemStack[46];
+        ItemStack cursor = ItemStack.AIR;
 
         final ScratchFeature.Messaging messaging;
         final ScratchFeature.Movement movement;
         final ScratchFeature.ChunkLoading chunkLoading;
         final ScratchFeature.EntityInteract entityInteract;
         final ScratchFeature.BlockInteract blockInteract;
+        final ScratchFeature.InventoryHandling inventoryHandling;
 
         Player(PlayerInfo info, Instance spawnInstance, Pos spawnPosition) {
             this.connection = info.connection;
@@ -355,6 +363,9 @@ public final class Scratch {
             this.instance = spawnInstance;
             this.position = spawnPosition;
             this.oldPosition = spawnPosition;
+
+            Arrays.fill(inventory, ItemStack.AIR);
+            inventory[0] = ItemStack.of(Material.STONE, 64);
 
             this.synchronizerEntry = instance.synchronizer.makeEntry(true, id, position,
                     () -> {
@@ -441,7 +452,7 @@ public final class Scratch {
             this.blockInteract = new ScratchFeature.BlockInteract(new ScratchFeature.BlockInteract.Mapping() {
                 @Override
                 public boolean creative() {
-                    return true;
+                    return gameMode == GameMode.CREATIVE;
                 }
 
                 @Override
@@ -462,6 +473,18 @@ public final class Scratch {
                 }
             });
 
+            this.inventoryHandling = new ScratchFeature.InventoryHandling(new ScratchFeature.InventoryHandling.Mapping() {
+                @Override
+                public void setPlayerItem(int slot, ItemStack itemStack) {
+                    inventory[slot] = itemStack;
+                }
+
+                @Override
+                public void setCursorItem(ItemStack itemStack) {
+                    cursor = itemStack;
+                }
+            });
+
             this.connection.networkContext.writePlays(initPackets());
         }
 
@@ -475,7 +498,7 @@ public final class Scratch {
                     8, 8,
                     false, true, false,
                     dimensionType.toString(), "world",
-                    0, GameMode.CREATIVE, null, false, true,
+                    0, gameMode, null, false, true,
                     new WorldPos("dimension", Vec.ZERO), 0);
             packets.add(joinGamePacket);
             packets.add(new SpawnPositionPacket(position, 0));
@@ -488,6 +511,8 @@ public final class Scratch {
                     (x, z) -> packets.add(blockHolder.generatePacket(x, z)));
 
             packets.add(new ChangeGameStatePacket(ChangeGameStatePacket.Reason.LEVEL_CHUNKS_LOAD_START, 0f));
+
+            packets.add(ScratchInventoryUtils.makePlayerPacket(inventory, cursor));
 
             return packets;
         }
@@ -507,7 +532,7 @@ public final class Scratch {
 
         private PlayerInfoUpdatePacket getAddPlayerToList() {
             final var infoEntry = new PlayerInfoUpdatePacket.Entry(uuid, username, List.of(),
-                    true, 1, GameMode.CREATIVE, null, null);
+                    true, 1, gameMode, null, null);
             return new PlayerInfoUpdatePacket(EnumSet.of(PlayerInfoUpdatePacket.Action.ADD_PLAYER, PlayerInfoUpdatePacket.Action.UPDATE_LISTED),
                     List.of(infoEntry));
         }

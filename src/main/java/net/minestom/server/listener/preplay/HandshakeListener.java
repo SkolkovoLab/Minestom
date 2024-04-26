@@ -41,7 +41,7 @@ public final class HandshakeListener {
         String address = packet.serverAddress();
         switch (packet.intent()) {
             case STATUS -> connection.setConnectionState(ConnectionState.STATUS);
-            case LOGIN -> {
+            case LOGIN,TRANSFER -> {
                 connection.setConnectionState(ConnectionState.LOGIN);
                 if (packet.protocolVersion() != MinecraftServer.PROTOCOL_VERSION) {
                     // Incorrect client version
@@ -113,9 +113,6 @@ public final class HandshakeListener {
                         return;
                     }
                 }
-            }
-            case TRANSFER -> {
-                throw new UnsupportedOperationException("Transfer intent is not supported in HandshakeListener");
             }
             default -> {
                 // Unexpected error

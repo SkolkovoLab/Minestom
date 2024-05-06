@@ -11,7 +11,7 @@ public final class ScratchInventoryUtils {
     public static WindowItemsPacket makePlayerPacket(ItemStack[] inventoryItems, ItemStack cursor) {
         List<ItemStack> items = new ArrayList<>();
         for (int i = 0; i < inventoryItems.length; i++) {
-            final int internalSlot = PlayerInventoryUtils.convertPlayerInventorySlot(i, PlayerInventoryUtils.OFFSET);
+            final int internalSlot = PlayerInventoryUtils.protocolToMinestom(i);
             items.add(inventoryItems[internalSlot]);
         }
         return new WindowItemsPacket((byte) 0, 0, items, cursor);

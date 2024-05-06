@@ -15,6 +15,7 @@ import net.minestom.server.network.packet.client.configuration.ClientFinishConfi
 import net.minestom.server.network.packet.client.login.ClientLoginAcknowledgedPacket;
 import net.minestom.server.network.packet.client.login.ClientLoginStartPacket;
 import net.minestom.server.network.packet.client.status.StatusRequestPacket;
+import net.minestom.server.network.packet.server.SendablePacket;
 import net.minestom.server.network.packet.server.ServerPacket;
 import net.minestom.server.network.packet.server.common.PingResponsePacket;
 import net.minestom.server.network.packet.server.configuration.FinishConfigurationPacket;
@@ -40,7 +41,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static net.minestom.scratch.tools.ScratchTools.REGISTRY_DATA_PACKET;
+import static net.minestom.scratch.tools.ScratchTools.REGISTRY_DATA_PACKETS;
 
 /**
  * Limbo server example.
@@ -188,10 +189,12 @@ public final class ScratchLimbo {
                 case ClientLoginStartPacket startPacket -> {
                     username = startPacket.username();
                     uuid = UUID.randomUUID();
-                    this.networkContext.write(new LoginSuccessPacket(startPacket.profileId(), startPacket.username(), 0));
+                    this.networkContext.write(new LoginSuccessPacket(startPacket.profileId(), startPacket.username(), 0, false));
                 }
                 case ClientLoginAcknowledgedPacket ignored -> {
-                    this.networkContext.write(REGISTRY_DATA_PACKET);
+                    for (SendablePacket registryDataPacket : REGISTRY_DATA_PACKETS) {
+                        this.networkContext.write(SendablePacket.extractServerPacket(ConnectionState.CONFIGURATION, registryDataPacket));
+                    }
                     this.networkContext.write(new FinishConfigurationPacket());
                 }
                 default -> {
@@ -273,9 +276,9 @@ public final class ScratchLimbo {
                     id, false, List.of(), 0,
                     VIEW_DISTANCE, VIEW_DISTANCE,
                     false, true, false,
-                    dimensionType.toString(), "world",
+                    dimensionType.getId(), "world",
                     0, GameMode.CREATIVE, null, false, true,
-                    new WorldPos("dimension", Vec.ZERO), 0));
+                    new WorldPos("dimension", Vec.ZERO), 0, false));
             this.networkContext.write(new SpawnPositionPacket(position, 0));
             this.networkContext.write(new PlayerPositionAndLookPacket(position, (byte) 0, 0));
             this.networkContext.write(new PlayerInfoUpdatePacket(EnumSet.of(PlayerInfoUpdatePacket.Action.ADD_PLAYER, PlayerInfoUpdatePacket.Action.UPDATE_LISTED),

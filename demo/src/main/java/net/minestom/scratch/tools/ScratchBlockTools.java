@@ -2,6 +2,7 @@ package net.minestom.scratch.tools;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import net.kyori.adventure.nbt.CompoundBinaryTag;
 import net.minestom.server.instance.block.Block;
 import net.minestom.server.instance.palette.Palette;
 import net.minestom.server.network.NetworkBuffer;
@@ -12,7 +13,6 @@ import net.minestom.server.utils.chunk.ChunkUtils;
 import net.minestom.server.world.DimensionType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.UnknownNullability;
-import org.jglrxavpok.hephaistos.nbt.NBTCompound;
 
 import java.util.Arrays;
 import java.util.BitSet;
@@ -53,7 +53,7 @@ public final class ScratchBlockTools {
                 }
             });
             return new ChunkDataPacket(chunkX, chunkZ,
-                    new ChunkData(NBTCompound.EMPTY, data, Map.of()),
+                    new ChunkData(CompoundBinaryTag.empty(), data, Map.of()),
                     new LightData(new BitSet(), new BitSet(), new BitSet(), new BitSet(), List.of(), List.of())
             );
         }

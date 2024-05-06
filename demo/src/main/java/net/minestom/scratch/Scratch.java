@@ -26,7 +26,9 @@ import net.minestom.server.network.packet.client.common.ClientPingRequestPacket;
 import net.minestom.server.network.packet.client.configuration.ClientFinishConfigurationPacket;
 import net.minestom.server.network.packet.client.login.ClientLoginAcknowledgedPacket;
 import net.minestom.server.network.packet.client.login.ClientLoginStartPacket;
+import net.minestom.server.network.packet.client.play.ClientConfigurationAckPacket;
 import net.minestom.server.network.packet.client.status.StatusRequestPacket;
+import net.minestom.server.network.packet.server.SendablePacket;
 import net.minestom.server.network.packet.server.ServerPacket;
 import net.minestom.server.network.packet.server.common.KeepAlivePacket;
 import net.minestom.server.network.packet.server.common.PingResponsePacket;
@@ -50,7 +52,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static net.minestom.scratch.tools.ScratchTools.REGISTRY_DATA_PACKET;
+import static net.minestom.scratch.tools.ScratchTools.REGISTRY_DATA_PACKETS;
 import static net.minestom.scratch.tools.ScratchViewTools.Broadcaster;
 import static net.minestom.scratch.tools.ScratchViewTools.Synchronizer;
 
@@ -250,8 +252,8 @@ public final class Scratch {
                     this.networkContext.write(new ResponsePacket("""
                             {
                                 "version": {
-                                    "name": "1.20.4",
-                                    "protocol": 765
+                                    "name": "1.20.6",
+                                    "protocol": 766
                                 },
                                 "players": {
                                     "max": 100,
@@ -271,10 +273,12 @@ public final class Scratch {
                 case ClientLoginStartPacket startPacket -> {
                     nameRef.set(startPacket.username());
                     uuidRef.set(UUID.randomUUID());
-                    this.networkContext.write(new LoginSuccessPacket(startPacket.profileId(), startPacket.username(), 0));
+                    this.networkContext.write(new LoginSuccessPacket(startPacket.profileId(), startPacket.username(), 0, false));
                 }
                 case ClientLoginAcknowledgedPacket ignored -> {
-                    this.networkContext.write(REGISTRY_DATA_PACKET);
+                    for (SendablePacket registryDataPacket : REGISTRY_DATA_PACKETS) {
+                        this.networkContext.write(SendablePacket.extractServerPacket(ConnectionState.CONFIGURATION, registryDataPacket));
+                    }
                     this.networkContext.write(new FinishConfigurationPacket());
                 }
                 default -> {
@@ -494,12 +498,12 @@ public final class Scratch {
             List<ServerPacket.Play> packets = new ArrayList<>();
 
             final JoinGamePacket joinGamePacket = new JoinGamePacket(
-                    id, false, List.of(), 0,
+                    id, false, List.of(), 100,
                     8, 8,
                     false, true, false,
-                    dimensionType.toString(), "world",
+                    dimensionType.getId(), "world",
                     0, gameMode, null, false, true,
-                    new WorldPos("dimension", Vec.ZERO), 0);
+                    new WorldPos("dimension", Vec.ZERO), 0, false);
             packets.add(joinGamePacket);
             packets.add(new SpawnPositionPacket(position, 0));
             packets.add(new PlayerPositionAndLookPacket(position, (byte) 0, 0));

@@ -79,8 +79,8 @@ public final class ScratchNetworkTools {
     public static ConnectionState nextState(ClientPacket packet, ConnectionState currentState) {
         return switch (packet) {
             case ClientHandshakePacket handshakePacket -> switch (handshakePacket.intent()) {
-                case 1 -> ConnectionState.STATUS;
-                case 2 -> ConnectionState.LOGIN;
+                case STATUS -> ConnectionState.STATUS;
+                case LOGIN -> ConnectionState.LOGIN;
                 default -> throw new IllegalStateException("Unexpected value: " + handshakePacket.intent());
             };
             case ClientLoginAcknowledgedPacket ignored -> ConnectionState.CONFIGURATION;

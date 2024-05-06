@@ -160,7 +160,7 @@ public interface ScratchFeature extends Consumer<ClientPacket> {
                     List<ClientClickWindowPacket.ChangedSlot> changedSlots, ItemStack clickedItem
             )) {
                 for (ClientClickWindowPacket.ChangedSlot changedSlot : changedSlots) {
-                    final int internalSlot = PlayerInventoryUtils.convertPlayerInventorySlot(changedSlot.slot(), PlayerInventoryUtils.OFFSET);
+                    final int internalSlot = PlayerInventoryUtils.minestomToProtocol(changedSlot.slot());
                     mapping.setPlayerItem(internalSlot, changedSlot.item());
                 }
                 mapping.setCursorItem(clickedItem);

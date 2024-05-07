@@ -24,7 +24,7 @@ public class PacketProcessor {
 
     private final PacketListenerManager packetListenerManager;
 
-    public PacketProcessor(@NotNull PacketListenerManager packetListenerManager) {
+    public PacketProcessor(PacketListenerManager packetListenerManager) {
         statusHandler = new ClientPacketsHandler.Status();
         loginHandler = new ClientPacketsHandler.Login();
         configurationHandler = new ClientPacketsHandler.Configuration();

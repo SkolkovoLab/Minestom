@@ -32,7 +32,7 @@ public class WorldBorder {
     private int warningTime;
     private int warningBlocks;
 
-    public WorldBorder(@NotNull Instance instance) {
+    public WorldBorder(Instance instance) {
         this.instance = instance;
 
         this.oldDiameter = Double.MAX_VALUE;

@@ -34,34 +34,36 @@ import net.minestom.server.entity.metadata.water.GlowSquidMeta;
 import net.minestom.server.entity.metadata.water.SquidMeta;
 import net.minestom.server.entity.metadata.water.fish.*;
 import net.minestom.server.registry.Registry;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
 import java.util.Map;
 import java.util.function.BiFunction;
 
-record EntityTypeImpl(Registry.EntityEntry registry) implements EntityType {
+@ApiStatus.Internal
+public record EntityTypeImpl(Registry.EntityEntry registry) implements EntityType {
     private static final Registry.Container<EntityType> CONTAINER = Registry.createStaticContainer(Registry.Resource.ENTITIES,
             (namespace, properties) -> new EntityTypeImpl(Registry.entity(namespace, properties)));
-    static final Map<String, BiFunction<Entity, Metadata, EntityMeta>> ENTITY_META_SUPPLIER = createMetaMap();
+    public static final Map<String, BiFunction<Entity, Metadata, EntityMeta>> ENTITY_META_SUPPLIER = createMetaMap();
 
-    static EntityType get(@NotNull String namespace) {
+    public static EntityType get(@NotNull String namespace) {
         return CONTAINER.get(namespace);
     }
 
-    static EntityType getSafe(@NotNull String namespace) {
+    public static EntityType getSafe(@NotNull String namespace) {
         return CONTAINER.getSafe(namespace);
     }
 
-    static EntityType getId(int id) {
+    public static EntityType getId(int id) {
         return CONTAINER.getId(id);
     }
 
-    static Collection<EntityType> values() {
+    public static Collection<EntityType> values() {
         return CONTAINER.values();
     }
 
-    static EntityMeta createMeta(EntityType entityType, Entity entity, Metadata metadata) {
+    public static EntityMeta createMeta(EntityType entityType, Entity entity, Metadata metadata) {
         return ENTITY_META_SUPPLIER.get(entityType.name()).apply(entity, metadata);
     }
 

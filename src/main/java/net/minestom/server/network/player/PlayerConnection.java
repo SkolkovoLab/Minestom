@@ -119,7 +119,8 @@ public abstract class PlayerConnection {
         this.online = false;
         MinecraftServer.getConnectionManager().removePlayer(this);
         final Player player = getPlayer();
-        if (player != null && !player.isRemoved()) {
+        // if player in configuration, his Scheduler not active, and scheduleNextTick never execute
+        if (player != null && !player.isRemoved() && player.getAliveTicks() > 0) {
             player.scheduleNextTick(Entity::remove);
         }
     }

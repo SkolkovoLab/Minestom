@@ -47,7 +47,7 @@ final class EntityView {
                         }
                     }
                     // Entity#updateNewViewer handles calling itself for passengers
-                    if (entity.getVehicle() != null) return;
+//                    if (entity.getVehicle() != null) return;
                     entity.updateNewViewer(player);
                 },
                 player -> {
@@ -218,7 +218,7 @@ final class EntityView {
             references().forEach(entity -> {
                 if (entity == EntityView.this.entity || !visibilityPredicate.test(entity)) return;
                 if (entity instanceof Player player && manualViewers.contains(player)) return;
-                if (entity.getVehicle() != null) return;
+//                if (entity.getVehicle() != null) return;
                 action.accept(entity);
             });
         }

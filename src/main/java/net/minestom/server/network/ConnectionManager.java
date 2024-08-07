@@ -277,7 +277,10 @@ public final class ConnectionManager {
         return AsyncUtils.runAsync(() -> {
             var event = new AsyncPlayerConfigurationEvent(player, isFirstConfig);
             EventDispatcher.call(event);
-            if (!player.isOnline()) return; // Player was kicked during config.
+            if (!player.isOnline()) {
+                player.remove(); // Call PlayerDisconnectEvent
+                return; // Player was kicked during config.
+            }
 
             player.sendPacket(new UpdateEnabledFeaturesPacket(event.getFeatureFlags().stream().map(StaticProtocolObject::namespace).collect(Collectors.toSet()))); // send player features that were enabled or disabled during async config event
 

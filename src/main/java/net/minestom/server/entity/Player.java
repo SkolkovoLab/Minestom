@@ -579,12 +579,12 @@ public class Player extends LivingEntity implements CommandSender, Localizable, 
 
     @Override
     public void remove(boolean permanent) {
-        if (isRemoved()) return;
-
         if (permanent) {
             this.packets.clear();
             EventDispatcher.call(new PlayerDisconnectEvent(this));
         }
+
+        if (isRemoved()) return;
 
         super.remove(permanent);
 

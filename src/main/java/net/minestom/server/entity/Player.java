@@ -175,6 +175,7 @@ public class Player extends LivingEntity implements CommandSender, Localizable, 
     private int receivedTeleportId;
 
     private final MpscArrayQueue<ClientPacket> packets = new MpscArrayQueue<>(ServerFlag.PLAYER_PACKET_QUEUE_SIZE);
+    private final MpscArrayQueue<ClientPacket> playPackets = new MpscArrayQueue<>(ServerFlag.PLAYER_PACKET_QUEUE_SIZE);
     private final boolean levelFlat;
     private final PlayerSettings settings;
     private float exp;
@@ -2126,7 +2127,13 @@ public class Player extends LivingEntity implements CommandSender, Localizable, 
      * @param packet the packet to add in the queue
      */
     public void addPacketToQueue(@NotNull ClientPacket packet) {
-        final boolean success = packets.offer(packet);
+        MpscArrayQueue<ClientPacket> packetQueue;
+        if (playerConnection.getConnectionState() != ConnectionState.PLAY)
+            packetQueue = packets;
+        else
+            packetQueue = playPackets;
+
+        final boolean success = packetQueue.offer(packet);
         if (!success) {
             kick(Component.text("Too Many Packets", NamedTextColor.RED));
         }
@@ -2137,6 +2144,13 @@ public class Player extends LivingEntity implements CommandSender, Localizable, 
         final PacketListenerManager manager = MinecraftServer.getPacketListenerManager();
         // This method is NOT thread-safe
         this.packets.drain(packet -> manager.processClientPacket(packet, playerConnection), ServerFlag.PLAYER_PACKET_PER_TICK);
+    }
+
+    @ApiStatus.Internal
+    public void interpretPlayPacketQueue() {
+        final PacketListenerManager manager = MinecraftServer.getPacketListenerManager();
+        // This method is NOT thread-safe
+        this.playPackets.drain(packet -> manager.processClientPacket(packet, playerConnection), ServerFlag.PLAYER_PACKET_PER_TICK);
     }
 
     /**

@@ -111,11 +111,6 @@ public interface ServerProcess extends Registries, Snapshotable {
     @NotNull Server server();
 
     /**
-     * Dispatcher for tickable game objects.
-     */
-    @NotNull ThreadDispatcher<Chunk> dispatcher();
-
-    /**
      * Handles the server ticks.
      */
     @NotNull Ticker ticker();

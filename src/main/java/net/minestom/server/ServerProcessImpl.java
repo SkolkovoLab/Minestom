@@ -5,6 +5,7 @@ import net.minestom.server.advancements.AdvancementManager;
 import net.minestom.server.adventure.bossbar.BossBarManager;
 import net.minestom.server.command.CommandManager;
 import net.minestom.server.entity.Entity;
+import net.minestom.server.entity.Player;
 import net.minestom.server.entity.damage.DamageType;
 import net.minestom.server.entity.metadata.animal.tameable.WolfMeta;
 import net.minestom.server.entity.metadata.other.PaintingMeta;
@@ -13,7 +14,6 @@ import net.minestom.server.event.GlobalEventHandler;
 import net.minestom.server.event.server.ServerTickMonitorEvent;
 import net.minestom.server.exception.ExceptionManager;
 import net.minestom.server.gamedata.tags.TagManager;
-import net.minestom.server.instance.Chunk;
 import net.minestom.server.instance.Instance;
 import net.minestom.server.instance.InstanceManager;
 import net.minestom.server.instance.block.BlockManager;
@@ -36,8 +36,6 @@ import net.minestom.server.registry.DynamicRegistry;
 import net.minestom.server.scoreboard.TeamManager;
 import net.minestom.server.snapshot.*;
 import net.minestom.server.thread.Acquirable;
-import net.minestom.server.thread.ThreadDispatcher;
-import net.minestom.server.thread.ThreadProvider;
 import net.minestom.server.timer.SchedulerManager;
 import net.minestom.server.utils.PacketViewableUtils;
 import net.minestom.server.utils.collection.MappedCollection;
@@ -52,6 +50,10 @@ import java.io.IOException;
 import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -94,11 +96,15 @@ final class ServerProcessImpl implements ServerProcess {
 
     private final Server server;
 
-    private final ThreadDispatcher<Chunk> dispatcher;
     private final Ticker ticker;
 
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicBoolean stopped = new AtomicBoolean();
+
+    private final ExecutorService instanceTicker = Executors.newThreadPerTaskExecutor(Thread.ofVirtual()
+            .name("InstanceTicker")
+            .factory()
+    );
 
     public ServerProcessImpl() {
         this.exception = new ExceptionManager();
@@ -139,7 +145,6 @@ final class ServerProcessImpl implements ServerProcess {
 
         this.server = new Server(packetParser);
 
-        this.dispatcher = ThreadDispatcher.of(ThreadProvider.counter(), ServerFlag.DISPATCHER_THREADS);
         this.ticker = new TickerImpl();
     }
 
@@ -299,11 +304,6 @@ final class ServerProcessImpl implements ServerProcess {
     }
 
     @Override
-    public @NotNull ThreadDispatcher<Chunk> dispatcher() {
-        return dispatcher;
-    }
-
-    @Override
     public @NotNull Ticker ticker() {
         return ticker;
     }
@@ -343,7 +343,6 @@ final class ServerProcessImpl implements ServerProcess {
         server.stop();
         LOGGER.info("Shutting down all thread pools.");
         benchmark.disable();
-        dispatcher.shutdown();
         LOGGER.info(MinecraftServer.getBrandName() + " server stopped successfully.");
     }
 
@@ -394,19 +393,45 @@ final class ServerProcessImpl implements ServerProcess {
 
         private void serverTick(long tickStart) {
             // Tick all instances
-            for (Instance instance : instance().getInstances()) {
-                try {
-                    instance.tick(tickStart);
-                } catch (Exception e) {
-                    exception().handleException(e);
-                }
-            }
-            // Tick all chunks (and entities inside)
-            dispatcher().updateAndAwait(tickStart);
+            Set<@NotNull Instance> instances = instance().getInstances();
+            CountDownLatch launchLatch = new CountDownLatch(instances.size());
+            for (Instance instance : instances) {
+                instanceTicker.execute(() -> {
+                    try {
+                        Set<@NotNull Player> players = instance.getPlayers();
 
-            // Clear removed entities & update threads
-            final long tickTime = System.currentTimeMillis() - tickStart;
-            dispatcher().refreshThreads(tickTime);
+                        for (Player player : players) {
+                            try {
+                                player.interpretPlayPacketQueue();
+                            } catch (Exception e) {
+                                exception().handleException(e);
+                            }
+                        }
+
+                        try {
+                            instance.tick(tickStart);
+                        } catch (Exception e) {
+                            exception().handleException(e);
+                        }
+
+                        for (Entity entity : instance.getEntities()) {
+                            try {
+                                entity.tick(tickStart);
+                            } catch (Exception e) {
+                                exception().handleException(e);
+                            }
+                        }
+                    } finally {
+                        launchLatch.countDown();
+                    }
+                });
+            }
+
+            try {
+                launchLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 }

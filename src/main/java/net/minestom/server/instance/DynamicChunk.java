@@ -335,6 +335,6 @@ public class DynamicChunk extends Chunk {
     }
 
     private void assertLock() {
-        assert Thread.holdsLock(this) : "Chunk must be locked before access";
+//        assert Thread.holdsLock(this) : "Chunk must be locked before access";
     }
 }

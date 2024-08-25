@@ -11,6 +11,8 @@ import net.minestom.server.entity.metadata.animal.tameable.WolfMeta;
 import net.minestom.server.entity.metadata.other.PaintingMeta;
 import net.minestom.server.event.EventDispatcher;
 import net.minestom.server.event.GlobalEventHandler;
+import net.minestom.server.event.instance.InstanceGlobalEndTickEvent;
+import net.minestom.server.event.instance.InstanceGlobalStartTickEvent;
 import net.minestom.server.event.server.ServerTickMonitorEvent;
 import net.minestom.server.exception.ExceptionManager;
 import net.minestom.server.gamedata.tags.TagManager;
@@ -399,6 +401,7 @@ final class ServerProcessImpl implements ServerProcess {
             for (Instance instance : instances) {
                 instanceTicker.execute(() -> {
                     try {
+                        eventHandler.call(new InstanceGlobalStartTickEvent(instance, tickStart));
                         Set<@NotNull Player> players = instance.getPlayers();
 
                         for (Player player : players) {
@@ -422,6 +425,8 @@ final class ServerProcessImpl implements ServerProcess {
                                 exception().handleException(e);
                             }
                         }
+
+                        eventHandler.call(new InstanceGlobalEndTickEvent(instance, tickStart));
                     } finally {
                         launchLatch.countDown();
                     }

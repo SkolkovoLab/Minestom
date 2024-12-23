@@ -100,6 +100,7 @@ public final class PacketListenerManager {
         setPlayListener(ClientNameItemPacket.class, AnvilListener::nameItemListener);
         setPlayListener(ClientTickEndPacket.class, PlayerTickListener::listener);
         setPlayListener(ClientPlayerLoadedPacket.class, PlayerLoadedListener::listener);
+        setPlayListener(ClientPickItemFromBlockPacket.class, (packet, player) -> {/* empty */});
     }
 
     /**

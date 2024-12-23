@@ -101,6 +101,7 @@ public final class PacketListenerManager {
         setPlayListener(ClientTickEndPacket.class, PlayerTickListener::listener);
         setPlayListener(ClientPlayerLoadedPacket.class, PlayerLoadedListener::listener);
         setPlayListener(ClientSelectBundleItemPacket.class, (packet, player) -> {/* noop for now */});
+        setPlayListener(ClientPickItemFromBlockPacket.class, (packet, player) -> {/* empty */});
     }
 
     /**

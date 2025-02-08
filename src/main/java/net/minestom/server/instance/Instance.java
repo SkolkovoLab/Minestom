@@ -1002,4 +1002,8 @@ public abstract class Instance implements Block.Getter, Block.Setter,
             LightingChunk.relightSection(chunk.getInstance(), chunk.chunkX, sectionCoordinate, chunk.chunkZ);
         return light.getLevel(coordX, coordY, coordZ);
     }
+
+    public void destroyInstance() {
+        MinecraftServer.getInstanceManager().unregisterInstance(this);
+    }
 }

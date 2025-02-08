@@ -1,5 +1,6 @@
 package net.minestom.server;
 
+import com.sun.management.HotSpotDiagnosticMXBean;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minestom.server.advancements.AdvancementManager;
 import net.minestom.server.adventure.bossbar.BossBarManager;
@@ -56,14 +57,17 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.management.MBeanServer;
+import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.net.SocketAddress;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import java.time.Instant;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -451,9 +455,15 @@ final class ServerProcessImpl implements ServerProcess {
             }
         }
 
+        // For debug purpose
+        private final Set<Instance> unprocessedInstances = Collections.synchronizedSet(new HashSet<>());
+
         private void serverTick(long tickStart) {
             // Tick all instances
             Set<@NotNull Instance> instances = instance().getInstances();
+            unprocessedInstances.clear();
+            unprocessedInstances.addAll(instances);
+
             CountDownLatch launchLatch = new CountDownLatch(instances.size());
             for (Instance instance : instances) {
                 instanceTicker.execute(() -> {
@@ -485,16 +495,38 @@ final class ServerProcessImpl implements ServerProcess {
 
                         eventHandler.call(new InstanceGlobalEndTickEvent(instance, tickStart));
                     } finally {
+                        unprocessedInstances.remove(instance);
                         launchLatch.countDown();
                     }
                 });
             }
 
             try {
-                launchLatch.await();
-            } catch (InterruptedException e) {
+                var result = launchLatch.await(6, TimeUnit.SECONDS);
+                if (!result) {
+                    dumpHeap();
+                    for (@NotNull Instance instance : unprocessedInstances) {
+                        for (@NotNull Player player : instance.getPlayers()) {
+                            player.kick("Извини, слишком долгий tick-time, мы уже работаем над исправлением.");
+                        }
+                        instance.destroyInstance();
+                    }
+                }
+            } catch (IOException | InterruptedException e) {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+
+    public static void dumpHeap() throws IOException {
+        var file = new File("instanceLagDumps");
+        if (!file.isDirectory()) file.mkdir();
+
+        System.gc();
+        MBeanServer server = ManagementFactory.getPlatformMBeanServer();
+        HotSpotDiagnosticMXBean mxBean = ManagementFactory.newPlatformMXBeanProxy(
+                server, "com.sun.management:type=HotSpotDiagnostic", HotSpotDiagnosticMXBean.class);
+        mxBean.dumpHeap(new File(file, Instant.now().getEpochSecond() + ".hprof").getPath(), true);
     }
 }

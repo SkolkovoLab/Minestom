@@ -6,6 +6,7 @@ import net.minestom.server.network.packet.client.ClientPacket;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import static net.minestom.server.network.NetworkBuffer.STRING;
 import static net.minestom.server.network.NetworkBuffer.UUID;
@@ -18,7 +19,8 @@ public record ClientLoginStartPacket(@NotNull String username,
             ClientLoginStartPacket::new);
 
     public ClientLoginStartPacket {
-        if (username.length() > 16)
-            throw new IllegalArgumentException("Username is not allowed to be longer than 16 characters");
+        if (!pattern.matcher(username).find()) throw new IllegalArgumentException("Invalid username: " + username);
     }
+
+    private static final Pattern pattern = Pattern.compile("^[a-zA-Z0-9_]{2,16}$");
 }

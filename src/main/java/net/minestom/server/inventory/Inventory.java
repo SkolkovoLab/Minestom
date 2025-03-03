@@ -28,8 +28,8 @@ public non-sealed class Inventory extends AbstractInventory {
 
     private final int offset;
 
-    public Inventory(@NotNull InventoryType inventoryType, @NotNull Component title) {
-        super(inventoryType.getSize());
+    public Inventory(@NotNull InventoryType inventoryType, @NotNull Component title, boolean extended) {
+        super(inventoryType.getSize() + (extended ? 36 : 0));
         this.id = generateId();
         this.inventoryType = inventoryType;
         this.title = title;
@@ -37,8 +37,16 @@ public non-sealed class Inventory extends AbstractInventory {
         this.offset = getSize();
     }
 
+    public Inventory(@NotNull InventoryType inventoryType, @NotNull String title, boolean extended) {
+        this(inventoryType, Component.text(title), extended);
+    }
+
+    public Inventory(@NotNull InventoryType inventoryType, @NotNull Component title) {
+        this(inventoryType, title, false);
+    }
+
     public Inventory(@NotNull InventoryType inventoryType, @NotNull String title) {
-        this(inventoryType, Component.text(title));
+        this(inventoryType, title, false);
     }
 
     private static byte generateId() {

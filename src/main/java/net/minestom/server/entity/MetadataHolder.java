@@ -40,6 +40,7 @@ import org.jetbrains.annotations.UnknownNullability;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -149,6 +150,20 @@ public final class MetadataHolder {
 
     private byte setMaskByte(byte data, byte byteMask, int offset, byte newValue) {
         return (byte) ((data & ~byteMask) | ((newValue << offset) & byteMask));
+    }
+
+    public Map<Integer, Metadata.Entry<?>> setNotifyAboutChangesAndGet() {
+        if (!NOTIFIED_CHANGES.compareAndSet(this, false, true))
+            return Collections.emptyMap();
+
+        Map<Integer, Metadata.Entry<?>> entries;
+        synchronized (this.notNotifiedChanges) {
+            Map<Integer, Metadata.Entry<?>> awaitingChanges = this.notNotifiedChanges;
+            if (awaitingChanges.isEmpty()) return Collections.emptyMap();
+            entries = Map.copyOf(awaitingChanges);
+            awaitingChanges.clear();
+        }
+        return entries;
     }
 
     public void setNotifyAboutChanges(boolean notifyAboutChanges) {

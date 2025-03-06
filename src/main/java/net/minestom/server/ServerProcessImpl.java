@@ -1,5 +1,17 @@
 package net.minestom.server;
 
+import javax.management.MBeanServer;
+import java.io.File;
+import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.net.SocketAddress;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+
 import com.sun.management.HotSpotDiagnosticMXBean;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minestom.server.advancements.AdvancementManager;
@@ -18,11 +30,9 @@ import net.minestom.server.entity.metadata.animal.tameable.CatVariant;
 import net.minestom.server.entity.metadata.animal.tameable.WolfSoundVariant;
 import net.minestom.server.entity.metadata.animal.tameable.WolfVariant;
 import net.minestom.server.entity.metadata.other.PaintingVariant;
-import net.minestom.server.event.EventDispatcher;
 import net.minestom.server.event.GlobalEventHandler;
 import net.minestom.server.event.instance.InstanceGlobalEndTickEvent;
 import net.minestom.server.event.instance.InstanceGlobalStartTickEvent;
-import net.minestom.server.event.server.ServerTickMonitorEvent;
 import net.minestom.server.exception.ExceptionManager;
 import net.minestom.server.gamedata.tags.TagManager;
 import net.minestom.server.instance.Instance;
@@ -37,7 +47,6 @@ import net.minestom.server.item.instrument.Instrument;
 import net.minestom.server.listener.manager.PacketListenerManager;
 import net.minestom.server.message.ChatType;
 import net.minestom.server.monitoring.BenchmarkManager;
-import net.minestom.server.monitoring.TickMonitor;
 import net.minestom.server.network.ConnectionManager;
 import net.minestom.server.network.packet.PacketParser;
 import net.minestom.server.network.packet.PacketVanilla;
@@ -47,29 +56,13 @@ import net.minestom.server.recipe.RecipeManager;
 import net.minestom.server.registry.DynamicRegistry;
 import net.minestom.server.scoreboard.TeamManager;
 import net.minestom.server.snapshot.*;
-import net.minestom.server.thread.Acquirable;
 import net.minestom.server.timer.SchedulerManager;
-import net.minestom.server.utils.PacketViewableUtils;
 import net.minestom.server.utils.collection.MappedCollection;
 import net.minestom.server.world.DimensionType;
 import net.minestom.server.world.biome.Biome;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.management.MBeanServer;
-import java.io.File;
-import java.io.IOException;
-import java.lang.management.ManagementFactory;
-import java.net.SocketAddress;
-import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 final class ServerProcessImpl implements ServerProcess {
     private static final Logger LOGGER = LoggerFactory.getLogger(ServerProcessImpl.class);
@@ -121,11 +114,6 @@ final class ServerProcessImpl implements ServerProcess {
 
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicBoolean stopped = new AtomicBoolean();
-
-    private final ExecutorService instanceTicker = Executors.newCachedThreadPool(Thread.ofPlatform()
-            .name("InstanceTicker")
-            .factory()
-    );
 
     public ServerProcessImpl() {
         this.exception = new ExceptionManager();
@@ -434,99 +422,9 @@ final class ServerProcessImpl implements ServerProcess {
             final long msTime = System.currentTimeMillis();
 
             scheduler().processTick();
-
             // Connection tick (let waiting clients in, send keep alives, handle configuration players packets)
             connection().tick(msTime);
-
-            // Server tick (chunks/entities)
-            serverTick(msTime);
-
             scheduler().processTickEnd();
-
-            // Flush all waiting packets
-            PacketViewableUtils.flush();
-
-            // Monitoring
-            {
-                final double acquisitionTimeMs = Acquirable.resetAcquiringTime() / 1e6D;
-                final double tickTimeMs = (System.nanoTime() - nanoTime) / 1e6D;
-                final TickMonitor tickMonitor = new TickMonitor(tickTimeMs, acquisitionTimeMs);
-                EventDispatcher.call(new ServerTickMonitorEvent(tickMonitor));
-            }
         }
-
-        // For debug purpose
-        private final Set<Instance> unprocessedInstances = Collections.synchronizedSet(new HashSet<>());
-
-        private void serverTick(long tickStart) {
-            // Tick all instances
-            Set<@NotNull Instance> instances = instance().getInstances();
-            unprocessedInstances.clear();
-            unprocessedInstances.addAll(instances);
-
-            CountDownLatch launchLatch = new CountDownLatch(instances.size());
-            for (Instance instance : instances) {
-                instanceTicker.execute(() -> {
-                    try {
-                        eventHandler.call(new InstanceGlobalStartTickEvent(instance, tickStart));
-                        Set<@NotNull Player> players = instance.getPlayers();
-
-                        for (Player player : players) {
-                            try {
-                                player.interpretPlayPacketQueue();
-                            } catch (Exception e) {
-                                exception().handleException(e);
-                            }
-                        }
-
-                        try {
-                            instance.tick(tickStart);
-                        } catch (Exception e) {
-                            exception().handleException(e);
-                        }
-
-                        for (Entity entity : instance.getEntities()) {
-                            try {
-                                entity.tick(tickStart);
-                            } catch (Exception e) {
-                                exception().handleException(e);
-                            }
-                        }
-
-                        eventHandler.call(new InstanceGlobalEndTickEvent(instance, tickStart));
-                    } finally {
-                        unprocessedInstances.remove(instance);
-                        launchLatch.countDown();
-                    }
-                });
-            }
-
-            try {
-                var result = launchLatch.await(6, TimeUnit.SECONDS);
-                if (!result) {
-                    dumpHeap();
-                    for (@NotNull Instance instance : unprocessedInstances) {
-                        for (@NotNull Player player : instance.getPlayers()) {
-                            player.kick("Извини, слишком долгий tick-time, мы уже работаем над исправлением.");
-                        }
-                        instance.destroyInstance();
-                    }
-                }
-            } catch (IOException | InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-
-    public static void dumpHeap() throws IOException {
-        var file = new File("instanceLagDumps");
-        if (!file.isDirectory()) file.mkdir();
-
-        System.gc();
-        MBeanServer server = ManagementFactory.getPlatformMBeanServer();
-        HotSpotDiagnosticMXBean mxBean = ManagementFactory.newPlatformMXBeanProxy(
-                server, "com.sun.management:type=HotSpotDiagnostic", HotSpotDiagnosticMXBean.class);
-        mxBean.dumpHeap(new File(file, Instant.now().getEpochSecond() + ".hprof").getPath(), true);
     }
 }

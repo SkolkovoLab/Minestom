@@ -483,7 +483,7 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
         player.sendPacket(this.getMetadataPacket());
         // Passengers
         final Set<Entity> passengers = this.passengers;
-        if (!passengers.isEmpty()) {
+        if (false) { // CounterMine
             for (Entity passenger : passengers) {
                 if (passenger != player) passenger.updateNewViewer(player);
             }
@@ -511,7 +511,7 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
     @ApiStatus.Internal
     public void updateOldViewer(@NotNull Player player) {
         final Set<Entity> passengers = this.passengers;
-        if (!passengers.isEmpty()) {
+        if (false) { // CounterMine
             for (Entity passenger : passengers) {
                 if (passenger != player) passenger.updateOldViewer(player);
             }
@@ -767,7 +767,6 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
     @ApiStatus.Internal
     protected void refreshCurrentChunk(Chunk currentChunk) {
         this.currentChunk = currentChunk;
-        MinecraftServer.process().dispatcher().updateElement(this, currentChunk);
     }
 
     /**
@@ -1488,7 +1487,6 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
         Set<Entity> leashedEntities = getLeashedEntities();
         leashedEntities.forEach(entity -> entity.setLeashHolder(null));
 
-        MinecraftServer.process().dispatcher().removeElement(this);
         this.removed = true;
         if (!permanent) {
             // Reset some state to be ready for re-use

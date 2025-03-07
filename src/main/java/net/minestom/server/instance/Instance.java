@@ -1,5 +1,12 @@
 package net.minestom.server.instance;
 
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
 import it.unimi.dsi.fastutil.objects.ObjectArraySet;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.identity.Identity;
@@ -22,6 +29,8 @@ import net.minestom.server.event.EventDispatcher;
 import net.minestom.server.event.EventFilter;
 import net.minestom.server.event.EventHandler;
 import net.minestom.server.event.EventNode;
+import net.minestom.server.event.instance.InstanceGlobalEndTickEvent;
+import net.minestom.server.event.instance.InstanceGlobalStartTickEvent;
 import net.minestom.server.event.instance.InstanceTickEvent;
 import net.minestom.server.event.trait.InstanceEvent;
 import net.minestom.server.instance.block.Block;
@@ -50,12 +59,8 @@ import net.minestom.server.world.DimensionType;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Instances are what are called "worlds" in Minecraft, you can add an entity in it using {@link Entity#setInstance(Instance)}.
@@ -69,7 +74,8 @@ import java.util.stream.Collectors;
  */
 public abstract class Instance implements Block.Getter, Block.Setter,
         Tickable, Schedulable, Snapshotable, EventHandler<InstanceEvent>, Taggable, PacketGroupingAudience {
-
+    private static final Logger logger = LoggerFactory.getLogger(Instance.class);
+    private static final AtomicInteger instanceIdCounter = new AtomicInteger();
     private boolean registered;
 
     private final DynamicRegistry.Key<DimensionType> dimensionType;
@@ -105,6 +111,12 @@ public abstract class Instance implements Block.Getter, Block.Setter,
     // the uuid of this instance
     protected UUID uuid;
 
+    public int getNumber() {
+        return number;
+    }
+
+    private final int number = instanceIdCounter.incrementAndGet();
+
     // instance custom data
     protected TagHandler tagHandler = TagHandler.newHandler();
     private final Scheduler scheduler = Scheduler.newScheduler();
@@ -112,9 +124,15 @@ public abstract class Instance implements Block.Getter, Block.Setter,
 
     // the explosion supplier
     private ExplosionSupplier explosionSupplier;
+    private InstanceThread thread;
 
     // Adventure
     private final Pointers pointers;
+    int tickTime = -1;
+
+    public int getTickTime() {
+        return tickTime;
+    }
 
     /**
      * Creates a new instance.
@@ -129,7 +147,7 @@ public abstract class Instance implements Block.Getter, Block.Setter,
     /**
      * Creates a new instance.
      *
-     * @param uuid      the {@link UUID} of the instance
+     * @param uuid          the {@link UUID} of the instance
      * @param dimensionType the {@link DimensionType} of the instance
      */
     public Instance(@NotNull UUID uuid, @NotNull DynamicRegistry.Key<DimensionType> dimensionType, @NotNull NamespaceID dimensionName) {
@@ -139,7 +157,7 @@ public abstract class Instance implements Block.Getter, Block.Setter,
     /**
      * Creates a new instance.
      *
-     * @param uuid      the {@link UUID} of the instance
+     * @param uuid          the {@link UUID} of the instance
      * @param dimensionType the {@link DimensionType} of the instance
      */
     public Instance(@NotNull DynamicRegistry<DimensionType> dimensionTypeRegistry, @NotNull UUID uuid, @NotNull DynamicRegistry.Key<DimensionType> dimensionType, @NotNull NamespaceID dimensionName) {
@@ -402,6 +420,49 @@ public abstract class Instance implements Block.Getter, Block.Setter,
      */
     protected void setRegistered(boolean registered) {
         this.registered = registered;
+        if (registered) {
+            thread = new InstanceThread(this);
+            thread.start();
+        } else {
+            thread.interrupt();
+            thread = null;
+        }
+    }
+
+    void threadLoop(long tickStart) {
+        var eventHandler = MinecraftServer.process().eventHandler();
+        var exceptionManager = MinecraftServer.getExceptionManager();
+        try {
+            eventHandler.call(new InstanceGlobalStartTickEvent(this, tickStart));
+            Set<@NotNull Player> players = getPlayers();
+
+            for (Player player : players) {
+                try {
+                    player.interpretPlayPacketQueue();
+                } catch (Exception e) {
+                    exceptionManager.handleException(e);
+                }
+            }
+
+            try {
+                tick(tickStart);
+            } catch (Exception e) {
+                exceptionManager.handleException(e);
+            }
+
+            for (Entity entity : getEntities()) {
+                try {
+                    entity.tick(tickStart);
+                } catch (Exception e) {
+                    exceptionManager.handleException(e);
+                }
+            }
+
+            eventHandler.call(new InstanceGlobalEndTickEvent(this, tickStart));
+        } catch (Exception ex) {
+            //noinspection StringConcatenationArgumentToLogCall
+            logger.error("Failed to tick instance " + uuid + " with age " + worldAge, ex);
+        }
     }
 
     /**
@@ -439,7 +500,7 @@ public abstract class Instance implements Block.Getter, Block.Setter,
     /**
      * Sets the age of this instance in tick. It will send the age to all players.
      * Will send new age to all players in the instance, unaffected by {@link #getTimeSynchronizationTicks()}
-     * 
+     *
      * @param worldAge the age of this instance in tick
      */
     public void setWorldAge(long worldAge) {
@@ -1001,5 +1062,9 @@ public abstract class Instance implements Block.Getter, Block.Setter,
         if (light.requiresUpdate())
             LightingChunk.relightSection(chunk.getInstance(), chunk.chunkX, sectionCoordinate, chunk.chunkZ);
         return light.getLevel(coordX, coordY, coordZ);
+    }
+
+    public void destroyInstance() {
+        MinecraftServer.getInstanceManager().unregisterInstance(this);
     }
 }

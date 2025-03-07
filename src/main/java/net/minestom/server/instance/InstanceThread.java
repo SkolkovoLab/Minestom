@@ -4,6 +4,8 @@ import net.minestom.server.MinecraftServer;
 
 public class InstanceThread extends Thread {
     private final Instance instance;
+    private final long startTime = System.currentTimeMillis();
+    private long tickCounter = 0;
 
     public InstanceThread(Instance instance) {
         super("Instance Thread " + instance.getNumber());
@@ -15,8 +17,13 @@ public class InstanceThread extends Thread {
         while (instance.isRegistered()) {
             var tickStart = System.currentTimeMillis();
             instance.threadLoop(tickStart);
-            instance.tickTime = (int) (System.currentTimeMillis() - tickStart);
-            var sleepTime = MinecraftServer.TICK_MS - instance.tickTime;
+            tickCounter++;
+            var tickEnd = System.currentTimeMillis();
+            instance.tickTime = (int) (tickEnd - tickStart);
+
+            var nextTickStart = startTime + (tickCounter * MinecraftServer.TICK_MS);
+
+            var sleepTime = nextTickStart - tickEnd;
             if (sleepTime > 0) {
                 try {
                     //noinspection BusyWait

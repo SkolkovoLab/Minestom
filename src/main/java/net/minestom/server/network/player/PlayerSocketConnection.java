@@ -194,7 +194,6 @@ public class PlayerSocketConnection extends PlayerConnection {
      */
     public void startCompression() {
         Check.stateCondition(compression(), "Compression is already enabled!");
-        this.compressionStart = sentPacketCounter.get();
         final int threshold = MinecraftServer.getCompressionThreshold();
         Check.stateCondition(threshold == 0, "Compression cannot be enabled because the threshold is equal to 0");
         sendPacket(new SetCompressionPacket(threshold));
@@ -425,9 +424,15 @@ public class PlayerSocketConnection extends PlayerConnection {
         NetworkBuffer buffer = PacketVanilla.PACKET_POOL.get();
         // Write to buffer
         PacketWriting.writeQueue(buffer, packetQueue, 1, (b, packet) -> {
-            final boolean compressed = sentPacketCounter.get() > compressionStart;
+            final long sentPacketCounterValue = sentPacketCounter.get();
+            final boolean compressed = sentPacketCounterValue > compressionStart;
             final boolean success = writeSendable(b, packet, compressed);
-            if (success) sentPacketCounter.getAndIncrement();
+            if (success) {
+                if (packet instanceof SetCompressionPacket) {
+                    compressionStart = sentPacketCounterValue;
+                }
+                sentPacketCounter.getAndIncrement();
+            }
             return success;
         });
         // Write to channel

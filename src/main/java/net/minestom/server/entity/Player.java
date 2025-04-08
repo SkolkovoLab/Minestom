@@ -169,6 +169,7 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
     private int receivedTeleportId;
 
     private final MpscArrayQueue<ClientPacket> packets = new MpscArrayQueue<>(ServerFlag.PLAYER_PACKET_QUEUE_SIZE);
+    private final MpscArrayQueue<ClientPacket> playPackets = new MpscArrayQueue<>(ServerFlag.PLAYER_PACKET_QUEUE_SIZE);
     private final boolean levelFlat;
     private ClientSettings settings = ClientSettings.DEFAULT;
     private float exp;
@@ -287,70 +288,84 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
         this.removed = false;
         this.dimensionTypeId = DIMENSION_TYPE_REGISTRY.getId(spawnInstance.getDimensionType().key());
 
-        final JoinGamePacket joinGamePacket = new JoinGamePacket(
-                getEntityId(), this.hardcore, List.of(), 0,
-                ServerFlag.CHUNK_VIEW_DISTANCE, ServerFlag.CHUNK_VIEW_DISTANCE,
-                false, true, false,
-                dimensionTypeId, spawnInstance.getDimensionName(), 0,
-                gameMode, null, false, levelFlat,
-                deathLocation, portalCooldown, DEFAULT_SEA_LEVEL,
-                true);
-        sendPacket(joinGamePacket);
+        var future = new CompletableFuture<Void>();
 
-        // Start sending inventory updates
-        inventory.addViewer(this);
+        spawnInstance.scheduler().scheduleNextTick(() -> {
+            try {
+                final JoinGamePacket joinGamePacket = new JoinGamePacket(
+                        getEntityId(), this.hardcore, List.of(), 0,
+                        ServerFlag.CHUNK_VIEW_DISTANCE, ServerFlag.CHUNK_VIEW_DISTANCE,
+                        false, true, false,
+                        dimensionTypeId, spawnInstance.getDimensionName(), 0,
+                        gameMode, null, false, levelFlat,
+                        deathLocation, portalCooldown, DEFAULT_SEA_LEVEL,
+                        true);
+                sendPacket(joinGamePacket);
 
-        // Difficulty
-        sendPacket(new ServerDifficultyPacket(MinecraftServer.getDifficulty(), true));
+                // Start sending inventory updates
+                inventory.addViewer(this);
 
-        sendPacket(new SpawnPositionPacket(respawnPoint, 0));
+                // Difficulty
+                sendPacket(new ServerDifficultyPacket(MinecraftServer.getDifficulty(), true));
 
-        // Reenable metadata notifications as we leave the configuration state
-        metadata.setNotifyAboutChanges(true);
-        sendPacket(getMetadataPacket());
+                sendPacket(new SpawnPositionPacket(respawnPoint, 0));
 
-        // Add player to list with spawning skin
-        PlayerSkin profileSkin = null;
-        for (GameProfile.Property property : gameProfile.properties()) {
-            if (property.name().equals("textures")) {
-                profileSkin = new PlayerSkin(property.value(), property.signature());
-                break;
-            }
-        }
-        PlayerSkinInitEvent skinInitEvent = new PlayerSkinInitEvent(this, profileSkin);
-        EventDispatcher.call(skinInitEvent);
-        this.skin = skinInitEvent.getSkin();
-        // FIXME: when using Geyser, this line remove the skin of the client
-        PacketSendingUtils.broadcastPlayPacket(getAddPlayerToList());
+                // Reenable metadata notifications as we leave the configuration state
+                metadata.setNotifyAboutChanges(true);
+                sendPacket(getMetadataPacket());
 
-        var connectionManager = MinecraftServer.getConnectionManager();
-        for (var player : connectionManager.getOnlinePlayers()) {
-            if (player != this) {
-                sendPacket(player.getAddPlayerToList());
-                if (player.displayName != null) {
-                    sendPacket(new PlayerInfoUpdatePacket(PlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME, player.infoEntry()));
+                // Add player to list with spawning skin
+                PlayerSkin profileSkin = null;
+                for (GameProfile.Property property : gameProfile.properties()) {
+                    if (property.name().equals("textures")) {
+                        profileSkin = new PlayerSkin(property.value(), property.signature());
+                        break;
+                    }
                 }
+                PlayerSkinInitEvent skinInitEvent = new PlayerSkinInitEvent(this, profileSkin);
+                EventDispatcher.call(skinInitEvent);
+                this.skin = skinInitEvent.getSkin();
+                // FIXME: when using Geyser, this line remove the skin of the client
+                PacketSendingUtils.broadcastPlayPacket(getAddPlayerToList());
+
+                var connectionManager = MinecraftServer.getConnectionManager();
+                for (var player : connectionManager.getOnlinePlayers()) {
+                    if (player != this) {
+                        sendPacket(player.getAddPlayerToList());
+                        if (player.displayName != null) {
+                            sendPacket(new PlayerInfoUpdatePacket(PlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME, player.infoEntry()));
+                        }
+                    }
+                }
+
+                //Teams
+                for (Team team : MinecraftServer.getTeamManager().getTeams()) {
+                    sendPacket(team.createTeamsCreationPacket());
+                }
+
+                // Commands
+                refreshCommands();
+
+                // Recipes
+                refreshRecipes();
+
+                // Some client updates
+                sendPacket(getPropertiesPacket()); // Send default properties
+                triggerStatus((byte) (EntityStatuses.Player.PERMISSION_LEVEL_0 + permissionLevel)); // Set permission level
+                refreshHealth(); // Heal and send health packet
+                refreshAbilities(); // Send abilities packet
+            } catch (Exception ex) {
+                future.completeExceptionally(ex);
             }
-        }
+            setInstance(spawnInstance)
+                    .whenComplete((result, throwable) -> {
+                        if (throwable != null) future.completeExceptionally(throwable);
+                        else future.complete(null);
+                    });
 
-        //Teams
-        for (Team team : MinecraftServer.getTeamManager().getTeams()) {
-            sendPacket(team.createTeamsCreationPacket());
-        }
+        });
 
-        // Commands
-        refreshCommands();
-
-        // Recipes
-        refreshRecipes();
-
-        // Some client updates
-        sendPacket(getPropertiesPacket()); // Send default properties
-        triggerStatus((byte) (EntityStatuses.Player.PERMISSION_LEVEL_0 + permissionLevel)); // Set permission level
-        refreshHealth(); // Heal and send health packet
-        refreshAbilities(); // Send abilities packet
-
-        return setInstance(spawnInstance);
+        return future;
     }
 
     /**
@@ -2093,7 +2108,13 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
      * @param packet the packet to add in the queue
      */
     public void addPacketToQueue(@NotNull ClientPacket packet) {
-        final boolean success = packets.offer(packet);
+        MpscArrayQueue<ClientPacket> packetQueue;
+        if (playerConnection.getConnectionState() != ConnectionState.PLAY)
+            packetQueue = packets;
+        else
+            packetQueue = playPackets;
+
+        final boolean success = packetQueue.offer(packet);
         if (!success) {
             kick(Component.text("Too Many Packets", NamedTextColor.RED));
         }
@@ -2105,6 +2126,14 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
         // This method is NOT thread-safe
         this.packets.drain(packet -> manager.processClientPacket(packet, playerConnection,
                 getPlayerConnection().getConnectionState()), ServerFlag.PLAYER_PACKET_PER_TICK);
+    }
+
+    @ApiStatus.Internal
+    public void interpretPlayPacketQueue() {
+        final PacketListenerManager manager = MinecraftServer.getPacketListenerManager();
+        // This method is NOT thread-safe
+        this.playPackets.drain(packet -> manager.processClientPacket(packet, playerConnection,
+                ConnectionState.PLAY), ServerFlag.PLAYER_PACKET_PER_TICK);
     }
 
     /**
@@ -2220,7 +2249,7 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
                 List.of(new PlayerInfoUpdatePacket.Property("textures", skin.textures(), skin.signature())) :
                 List.of();
         return new PlayerInfoUpdatePacket.Entry(getUuid(), getUsername(), prop,
-                true, getLatency(), getGameMode(), displayName, null, 0);
+                false, getLatency(), getGameMode(), displayName, null, 0);
     }
 
     /**

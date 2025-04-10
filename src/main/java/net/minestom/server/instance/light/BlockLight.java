@@ -66,11 +66,16 @@ final class BlockLight implements Light {
                         case EAST, TOP, SOUTH -> 15;
                     };
 
-                    final byte lightEmission = (byte) Math.max(switch (face) {
-                        case NORTH, SOUTH -> (byte) otherLight.getLevel(bx, by, 15 - k);
-                        case WEST, EAST -> (byte) otherLight.getLevel(15 - k, bx, by);
-                        default -> (byte) otherLight.getLevel(bx, 15 - k, by);
-                    } - 1, 0);
+                    final byte lightEmission;
+                    if (otherLight != null) {
+                        lightEmission = (byte) Math.max(switch (face) {
+                            case NORTH, SOUTH -> (byte) otherLight.getLevel(bx, by, 15 - k);
+                            case WEST, EAST -> (byte) otherLight.getLevel(15 - k, bx, by);
+                            default -> (byte) otherLight.getLevel(bx, 15 - k, by);
+                        } - 1, 0);
+                    } else {
+                        lightEmission = 0;
+                    }
 
                     final int posTo = switch (face) {
                         case NORTH, SOUTH -> bx | (k << 4) | (by << 8);

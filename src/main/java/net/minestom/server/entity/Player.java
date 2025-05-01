@@ -103,7 +103,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
@@ -659,36 +658,19 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
             return AsyncUtils.VOID_FUTURE;
         }
 
-        // One or more chunks need to be loaded
-        final Thread runThread = Thread.currentThread();
-        CountDownLatch latch = new CountDownLatch(1);
-        Scheduler scheduler = MinecraftServer.getSchedulerManager();
-        CompletableFuture<Void> future = new CompletableFuture<>() {
-            @Override
-            public Void join() {
-                // Prevent deadlock
-                if (runThread == Thread.currentThread()) {
-                    try {
-                        latch.await();
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                    scheduler.process();
-                    assert isDone();
-                }
-                return super.join();
-            }
-        };
-
+        var result = new CompletableFuture<Void>();
+        Scheduler scheduler = instance.scheduler();
         CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
-                .thenRun(() -> {
-                    scheduler.scheduleNextProcess(() -> {
+                .handle((r, ex) -> scheduler.scheduleNextTick(() -> {
+                    if (ex != null) {
+                        result.completeExceptionally(ex);
+                    } else {
                         runnable.accept(instance);
-                        future.complete(null);
-                    });
-                    latch.countDown();
-                });
-        return future;
+                        result.complete(null);
+                    }
+                }));
+
+        return result;
     }
 
     /**

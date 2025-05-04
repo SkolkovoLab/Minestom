@@ -577,6 +577,7 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
         if (permanent) {
             this.packets.clear();
             EventDispatcher.call(new PlayerDisconnectEvent(this));
+            if (getInstance() == null) return;
         }
 
         super.remove(permanent);

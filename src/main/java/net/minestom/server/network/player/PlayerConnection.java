@@ -5,8 +5,6 @@ import net.minestom.server.MinecraftServer;
 import net.minestom.server.crypto.PlayerPublicKey;
 import net.minestom.server.entity.Entity;
 import net.minestom.server.entity.Player;
-import net.minestom.server.event.EventDispatcher;
-import net.minestom.server.event.player.PlayerDisconnectEvent;
 import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.packet.server.SendablePacket;
 import net.minestom.server.network.packet.server.ServerPacket;
@@ -29,6 +27,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * A PlayerConnection is an object needed for all created {@link Player}.
@@ -144,11 +143,10 @@ public abstract class PlayerConnection {
         final Player player = MinecraftServer.getConnectionManager().getPlayer(this);
         if (player != null) {
             MinecraftServer.getConnectionManager().removePlayer(this);
-            if (connectionState == ConnectionState.PLAY && !player.isRemoved())
+            if (player.getInstance() != null)
                 player.scheduleNextTick(Entity::remove);
-            else {
-                EventDispatcher.call(new PlayerDisconnectEvent(player));
-            }
+            else
+                ForkJoinPool.commonPool().submit(() -> player.remove());
         }
     }
 

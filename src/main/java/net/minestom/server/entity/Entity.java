@@ -97,7 +97,7 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
             EntityType.AREA_EFFECT_CLOUD);
     private static final Set<EntityType> NO_ENTITY_COLLISION_ENTITIES = Set.of(EntityType.TEXT_DISPLAY, EntityType.ITEM_DISPLAY,
             EntityType.BLOCK_DISPLAY);
-    private final CachedPacket destroyPacketCache = new CachedPacket(() -> new DestroyEntitiesPacket(getEntityId()));
+    private final CachedPacket destroyPacketCache;
 
     protected Instance instance;
     protected Chunk currentChunk;
@@ -179,6 +179,7 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
 
     public Entity(@NotNull EntityType entityType, @NotNull UUID uuid) {
         this.id = generateId();
+        this.destroyPacketCache = new CachedPacket(() -> new DestroyEntitiesPacket(id));
         this.entityType = entityType;
         this.uuid = uuid;
         this.position = Pos.ZERO;

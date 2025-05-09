@@ -139,6 +139,7 @@ public final class Server {
                 }
             }
         }
+        connection.clearPacketQueue();
     }
 
     public boolean isOpen() {

@@ -202,11 +202,13 @@ public class PlayerSocketConnection extends PlayerConnection {
 
     @Override
     public void sendPacket(@NotNull SendablePacket packet) {
+        if (!isOnline()) return;
         this.packetQueue.relaxedOffer(packet);
     }
 
     @Override
     public void sendPackets(@NotNull Collection<SendablePacket> packets) {
+        if (!isOnline()) return;
         for (SendablePacket packet : packets) this.packetQueue.relaxedOffer(packet);
     }
 
@@ -435,6 +437,10 @@ public class PlayerSocketConnection extends PlayerConnection {
         // Keep the buffer if not fully written
         if (success) PacketVanilla.PACKET_POOL.add(buffer);
         else this.writeLeftover = buffer;
+    }
+
+    public void clearPacketQueue() {
+        packetQueue.clear();
     }
 
     record EncryptionContext(Cipher encrypt, Cipher decrypt) {

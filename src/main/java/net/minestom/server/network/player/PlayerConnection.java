@@ -143,7 +143,7 @@ public abstract class PlayerConnection {
         final Player player = MinecraftServer.getConnectionManager().getPlayer(this);
         if (player != null) {
             MinecraftServer.getConnectionManager().removePlayer(this);
-            if (player.getInstance() != null)
+            if (player.getInstance() != null && player.getAliveTicks() > 0)
                 player.scheduleNextTick(Entity::remove);
             else
                 ForkJoinPool.commonPool().submit(() -> player.remove());

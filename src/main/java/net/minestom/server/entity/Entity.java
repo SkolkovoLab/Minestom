@@ -111,7 +111,7 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
             EntityType.LINGERING_POTION, EntityType.AREA_EFFECT_CLOUD);
     private static final Set<EntityType> NO_ENTITY_COLLISION_ENTITIES = Set.of(EntityType.TEXT_DISPLAY, EntityType.ITEM_DISPLAY,
             EntityType.BLOCK_DISPLAY);
-    private final CachedPacket destroyPacketCache = new CachedPacket(() -> new DestroyEntitiesPacket(getEntityId()));
+    private final CachedPacket destroyPacketCache;
 
     protected Instance instance;
     protected Chunk currentChunk;
@@ -193,6 +193,7 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
 
     public Entity(@NotNull EntityType entityType, @NotNull UUID uuid) {
         this.id = generateId();
+        this.destroyPacketCache = new CachedPacket(() -> new DestroyEntitiesPacket(id));
         this.entityType = entityType;
         this.uuid = uuid;
         this.position = Pos.ZERO;
@@ -800,7 +801,6 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
     @ApiStatus.Internal
     protected void refreshCurrentChunk(Chunk currentChunk) {
         this.currentChunk = currentChunk;
-        MinecraftServer.process().dispatcher().updateElement(this, currentChunk);
     }
 
     /**
@@ -1528,7 +1528,6 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
         Set<Entity> leashedEntities = getLeashedEntities();
         leashedEntities.forEach(entity -> entity.setLeashHolder(null));
 
-        MinecraftServer.process().dispatcher().removeElement(this);
         this.removed = true;
         if (!permanent) {
             // Reset some state to be ready for re-use

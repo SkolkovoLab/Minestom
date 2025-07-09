@@ -323,7 +323,6 @@ public final class MinecraftServer implements MinecraftConstants {
      */
     public void start(@NotNull SocketAddress address) {
         serverProcess.start(address);
-        serverProcess.dispatcher().start();
         new TickSchedulerThread(serverProcess).start();
     }
 

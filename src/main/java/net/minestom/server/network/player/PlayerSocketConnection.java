@@ -211,12 +211,14 @@ public class PlayerSocketConnection extends PlayerConnection {
 
     @Override
     public void sendPacket(@NotNull SendablePacket packet) {
+        if (!isOnline()) return;
         this.packetQueue.relaxedOffer(packet);
         unlockWriteThread();
     }
 
     @Override
     public void sendPackets(@NotNull Collection<SendablePacket> packets) {
+        if (!isOnline()) return;
         for (SendablePacket packet : packets) this.packetQueue.relaxedOffer(packet);
         unlockWriteThread();
     }
@@ -469,6 +471,10 @@ public class PlayerSocketConnection extends PlayerConnection {
 
     public Thread writeThread() {
         return writeThread;
+    }
+
+    public void clearPacketQueue() {
+        packetQueue.clear();
     }
 
     record EncryptionContext(Cipher encrypt, Cipher decrypt) {

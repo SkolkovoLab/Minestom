@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * A PlayerConnection is an object needed for all created {@link Player}.
@@ -145,11 +146,12 @@ public abstract class PlayerConnection {
         final Player player = MinecraftServer.getConnectionManager().getPlayer(this);
         if (player != null) {
             MinecraftServer.getConnectionManager().removePlayer(this);
-            if (connectionState == ConnectionState.PLAY && !player.isRemoved())
+            if (player.getInstance() != null && player.getAliveTicks() > 0)
                 player.scheduleNextTick(Entity::remove);
             else {
                 EventDispatcher.call(new PlayerDisconnectEvent(player));
                 new EventsJFR.PlayerLeave(player.getUuid().toString()).commit();
+                ForkJoinPool.commonPool().submit(() -> player.remove());
             }
         }
     }

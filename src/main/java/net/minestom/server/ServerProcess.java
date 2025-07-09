@@ -7,7 +7,6 @@ import net.minestom.server.command.CommandManager;
 import net.minestom.server.entity.Entity;
 import net.minestom.server.event.GlobalEventHandler;
 import net.minestom.server.exception.ExceptionManager;
-import net.minestom.server.instance.Chunk;
 import net.minestom.server.instance.InstanceManager;
 import net.minestom.server.instance.block.BlockManager;
 import net.minestom.server.instance.block.rule.BlockPlacementRule;
@@ -21,7 +20,6 @@ import net.minestom.server.recipe.RecipeManager;
 import net.minestom.server.registry.Registries;
 import net.minestom.server.scoreboard.TeamManager;
 import net.minestom.server.snapshot.Snapshotable;
-import net.minestom.server.thread.ThreadDispatcher;
 import net.minestom.server.timer.SchedulerManager;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -107,11 +105,6 @@ public interface ServerProcess extends Registries, Snapshotable {
      * Exposed socket server.
      */
     Server server();
-
-    /**
-     * Dispatcher for tickable game objects.
-     */
-    ThreadDispatcher<Chunk, Entity> dispatcher();
 
     /**
      * Handles the server ticks.

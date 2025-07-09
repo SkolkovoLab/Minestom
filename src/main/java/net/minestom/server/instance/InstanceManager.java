@@ -1,6 +1,11 @@
 package net.minestom.server.instance;
 
-import net.minestom.server.MinecraftServer;
+import java.util.Collections;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArraySet;
+
 import net.minestom.server.entity.Player;
 import net.minestom.server.event.EventDispatcher;
 import net.minestom.server.event.instance.InstanceRegisterEvent;
@@ -10,12 +15,6 @@ import net.minestom.server.registry.RegistryKey;
 import net.minestom.server.utils.validate.Check;
 import net.minestom.server.world.DimensionType;
 import org.jetbrains.annotations.Nullable;
-
-import java.util.Collections;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * Used to register {@link Instance}.
@@ -123,8 +122,6 @@ public final class InstanceManager {
             // Unload all chunks
             if (instance instanceof InstanceContainer) {
                 instance.getChunks().forEach(instance::unloadChunk);
-                var dispatcher = MinecraftServer.process().dispatcher();
-                instance.getChunks().forEach(dispatcher::deletePartition);
             }
             // Unregister
             instance.setRegistered(false);
@@ -165,8 +162,6 @@ public final class InstanceManager {
     private void UNSAFE_registerInstance(Instance instance) {
         instance.setRegistered(true);
         this.instances.add(instance);
-        var dispatcher = MinecraftServer.process().dispatcher();
-        instance.getChunks().forEach(dispatcher::createPartition);
         InstanceRegisterEvent event = new InstanceRegisterEvent(instance);
         EventDispatcher.call(event);
     }

@@ -15,11 +15,8 @@ import net.minestom.server.entity.metadata.animal.tameable.CatVariant;
 import net.minestom.server.entity.metadata.animal.tameable.WolfSoundVariant;
 import net.minestom.server.entity.metadata.animal.tameable.WolfVariant;
 import net.minestom.server.entity.metadata.other.PaintingVariant;
-import net.minestom.server.event.EventDispatcher;
 import net.minestom.server.event.GlobalEventHandler;
-import net.minestom.server.event.server.ServerTickMonitorEvent;
 import net.minestom.server.exception.ExceptionManager;
-import net.minestom.server.instance.Chunk;
 import net.minestom.server.instance.Instance;
 import net.minestom.server.instance.InstanceManager;
 import net.minestom.server.instance.block.BlockManager;
@@ -43,13 +40,8 @@ import net.minestom.server.recipe.RecipeManager;
 import net.minestom.server.registry.DynamicRegistry;
 import net.minestom.server.scoreboard.TeamManager;
 import net.minestom.server.snapshot.*;
-import net.minestom.server.thread.Acquirable;
-import net.minestom.server.thread.ThreadDispatcher;
-import net.minestom.server.thread.ThreadProvider;
 import net.minestom.server.timer.SchedulerManager;
-import net.minestom.server.utils.PacketViewableUtils;
 import net.minestom.server.utils.collection.MappedCollection;
-import net.minestom.server.utils.time.Tick;
 import net.minestom.server.world.DimensionType;
 import net.minestom.server.world.biome.Biome;
 import net.minestom.server.world.timeline.Timeline;
@@ -60,7 +52,6 @@ import java.io.IOException;
 import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -115,7 +106,6 @@ final class ServerProcessImpl implements ServerProcess {
 
     private final Server server;
 
-    private final ThreadDispatcher<Chunk, Entity> dispatcher;
     private final Ticker ticker;
 
     private final AtomicBoolean started = new AtomicBoolean();
@@ -172,7 +162,6 @@ final class ServerProcessImpl implements ServerProcess {
 
         this.server = new Server(packetParser);
 
-        this.dispatcher = ThreadDispatcher.dispatcher(ThreadProvider.counter(), ServerFlag.DISPATCHER_THREADS);
         this.ticker = new TickerImpl();
     }
 
@@ -382,11 +371,6 @@ final class ServerProcessImpl implements ServerProcess {
     }
 
     @Override
-    public ThreadDispatcher<Chunk, Entity> dispatcher() {
-        return dispatcher;
-    }
-
-    @Override
     public Ticker ticker() {
         return ticker;
     }
@@ -445,7 +429,6 @@ final class ServerProcessImpl implements ServerProcess {
         server.stop();
         LOGGER.info("Shutting down all thread pools.");
         benchmark.disable();
-        dispatcher.shutdown();
         LOGGER.info("{} server stopped successfully.", brand);
     }
 
@@ -473,49 +456,10 @@ final class ServerProcessImpl implements ServerProcess {
             var serverTickEvent = EventsJFR.newServerTick();
             serverTickEvent.begin();
             scheduler().processTick();
-
             // Connection tick (let waiting clients in, send keep alives, handle configuration players packets)
             connection().tick(nanoTime);
-
-            // Server tick (chunks/entities)
-            serverTick(nanoTime);
-
-            // The click callback provider needs ticking to clean up the cache.
-            clickCallbackManager().tick(nanoTime);
-
             scheduler().processTickEnd();
-
-            // Flush all waiting packets
-            PacketViewableUtils.flush();
-
-            // Monitoring
-            {
-                final double acquisitionTimeMs = Acquirable.resetAcquiringTime() / 1e6D;
-                final double tickTimeMs = (System.nanoTime() - nanoTime) / 1e6D;
-                final TickMonitor tickMonitor = new TickMonitor(tickTimeMs, acquisitionTimeMs);
-                EventDispatcher.call(new ServerTickMonitorEvent(tickMonitor));
-            }
             serverTickEvent.commit();
-        }
-
-        private void serverTick(long nanoStart) {
-            long milliStart = TimeUnit.NANOSECONDS.toMillis(nanoStart);
-            // Tick all instances
-            for (Instance instance : instance().getInstances()) {
-                try {
-                    instance.tick(milliStart);
-                } catch (Exception e) {
-                    exception().handleException(e);
-                }
-            }
-            // Tick all chunks (and entities inside)
-            dispatcher().updateAndAwait(nanoStart);
-
-            // Clear removed entities & update threads
-            final long tickDuration = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - nanoStart);
-            final long remainingTickDuration = Tick.SERVER_TICKS.getDuration().toNanos() - tickDuration;
-            // the nanoTimeout for refreshThreads is the remaining tick duration
-            dispatcher().refreshThreads(remainingTickDuration);
         }
     }
 }

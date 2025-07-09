@@ -281,8 +281,6 @@ public class InstanceContainer extends Instance {
         this.chunks.remove(CoordConversion.chunkIndex(chunkX, chunkZ));
         chunk.unload();
         chunkLoader.unloadChunk(chunk);
-        var dispatcher = MinecraftServer.process().dispatcher();
-        dispatcher.deletePartition(chunk);
     }
 
     @Override
@@ -770,7 +768,5 @@ public class InstanceContainer extends Instance {
 
     private void cacheChunk(Chunk chunk) {
         this.chunks.put(CoordConversion.chunkIndex(chunk.getChunkX(), chunk.getChunkZ()), chunk);
-        var dispatcher = MinecraftServer.process().dispatcher();
-        dispatcher.createPartition(chunk);
     }
 }

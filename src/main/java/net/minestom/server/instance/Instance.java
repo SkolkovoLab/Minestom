@@ -27,6 +27,8 @@ import net.minestom.server.event.EventDispatcher;
 import net.minestom.server.event.EventFilter;
 import net.minestom.server.event.EventHandler;
 import net.minestom.server.event.EventNode;
+import net.minestom.server.event.instance.InstanceGlobalEndTickEvent;
+import net.minestom.server.event.instance.InstanceGlobalStartTickEvent;
 import net.minestom.server.event.instance.InstanceSectionInvalidateEvent;
 import net.minestom.server.event.instance.InstanceTickEvent;
 import net.minestom.server.event.trait.InstanceEvent;
@@ -58,11 +60,14 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.UnmodifiableView;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -84,7 +89,8 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
     protected static final PointersSupplier<Instance> INSTANCE_POINTERS_SUPPLIER = PointersSupplier.<Instance>builder()
             .resolving(Identity.UUID, Instance::getUuid)
             .build();
-
+    private static final Logger logger = LoggerFactory.getLogger(Instance.class);
+    private static final AtomicInteger instanceIdCounter = new AtomicInteger();
     private boolean registered;
 
     private final RegistryKey<DimensionType> dimensionType;
@@ -125,6 +131,12 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
     // the uuid of this instance
     protected UUID uuid;
 
+    public int getNumber() {
+        return number;
+    }
+
+    private final int number = instanceIdCounter.incrementAndGet();
+
     // instance custom data
     protected TagHandler tagHandler = TagHandler.newHandler();
     private final Scheduler scheduler = Scheduler.newScheduler();
@@ -132,6 +144,13 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
 
     // the explosion supplier
     private ExplosionSupplier explosionSupplier;
+    private InstanceThread thread;
+
+    int tickTime = -1;
+
+    public int getTickTime() {
+        return tickTime;
+    }
 
     /**
      * Creates a new instance.
@@ -450,6 +469,49 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
      */
     protected void setRegistered(boolean registered) {
         this.registered = registered;
+        if (registered) {
+            thread = new InstanceThread(this);
+            thread.start();
+        } else {
+            thread.interrupt();
+            thread = null;
+        }
+    }
+
+    void threadLoop(long tickStart) {
+        var eventHandler = MinecraftServer.process().eventHandler();
+        var exceptionManager = MinecraftServer.getExceptionManager();
+        try {
+            eventHandler.call(new InstanceGlobalStartTickEvent(this, tickStart));
+            Set<Player> players = getPlayers();
+
+            for (Player player : players) {
+                try {
+                    player.interpretPlayPacketQueue();
+                } catch (Exception e) {
+                    exceptionManager.handleException(e);
+                }
+            }
+
+            try {
+                tick(tickStart);
+            } catch (Exception e) {
+                exceptionManager.handleException(e);
+            }
+
+            for (Entity entity : getEntities()) {
+                try {
+                    entity.tick(tickStart);
+                } catch (Exception e) {
+                    exceptionManager.handleException(e);
+                }
+            }
+
+            eventHandler.call(new InstanceGlobalEndTickEvent(this, tickStart));
+        } catch (Exception ex) {
+            //noinspection StringConcatenationArgumentToLogCall
+            logger.error("Failed to tick instance " + uuid + " with age " + worldAge, ex);
+        }
     }
 
     /**
@@ -1104,5 +1166,9 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
         if (light.requiresUpdate())
             LightingChunk.relightSection(chunk.getInstance(), chunk.chunkX, sectionCoordinate, chunk.chunkZ);
         return light.getLevel(coordX, coordY, coordZ);
+    }
+
+    public void destroyInstance() {
+        MinecraftServer.getInstanceManager().unregisterInstance(this);
     }
 }

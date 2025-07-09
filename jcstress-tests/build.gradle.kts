@@ -1,6 +1,5 @@
 plugins {
-    id("minestom.java-library")
-    alias(libs.plugins.jcstress.plugin)
+    id("io.github.reyerizo.gradle.jcstress") version "0.8.15"
 }
 
 dependencies {

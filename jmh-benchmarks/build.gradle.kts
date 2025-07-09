@@ -1,6 +1,5 @@
 plugins {
-    id("minestom.java-library")
-    alias(libs.plugins.jmh.plugin)
+    id("me.champeau.jmh") version ("0.7.2")
 }
 
 dependencies {

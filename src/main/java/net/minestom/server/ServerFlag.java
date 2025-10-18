@@ -24,6 +24,7 @@ public final class ServerFlag {
     public static final long KNOWN_PACKS_RESPONSE_TIMEOUT = longProperty("minestom.known-packs-response-timeout", 5 * 60_000); // 5m
 
     // Network rate limiting
+    public static final boolean HAPROXY_ENABLED = booleanProperty("minestom.haproxy", false);
     public static final int PLAYER_PACKET_PER_TICK = intProperty("minestom.packet-per-tick", 50);
     public static final int PLAYER_PACKET_QUEUE_SIZE = intProperty("minestom.packet-queue-size", 1000);
     public static final long KEEP_ALIVE_DELAY = longProperty("minestom.keep-alive-delay", 10_000);
@@ -74,7 +75,8 @@ public final class ServerFlag {
 
     public static boolean INSIDE_TEST = booleanProperty("minestom.inside-test", false);
 
-    private ServerFlag() {}
+    private ServerFlag() {
+    }
 
     private static boolean booleanProperty(@NotNull String name) {
         return Boolean.getBoolean(name);

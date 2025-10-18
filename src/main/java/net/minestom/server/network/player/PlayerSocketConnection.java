@@ -98,12 +98,19 @@ public class PlayerSocketConnection extends PlayerConnection {
 
     private final ListenerHandle<PlayerPacketOutEvent> outgoing = EventDispatcher.getHandle(PlayerPacketOutEvent.class);
 
-    public PlayerSocketConnection(SocketChannel channel, SocketAddress remoteAddress, Thread readThread, Thread writeThread) {
+    private final boolean haProxy;
+
+    public PlayerSocketConnection(SocketChannel channel, SocketAddress remoteAddress, Thread readThread, Thread writeThread, boolean haProxy) {
         super();
         this.channel = channel;
         this.remoteAddress = remoteAddress;
         this.writeThread = writeThread;
         this.readThread = readThread;
+        this.haProxy = haProxy;
+    }
+
+    public PlayerSocketConnection(SocketChannel channel, SocketAddress remoteAddress, Thread readThread, Thread writeThread) {
+        this(channel, remoteAddress, readThread, writeThread, false);
     }
 
     public void read(PacketParser<ClientPacket> packetParser) throws IOException {
@@ -470,5 +477,8 @@ public class PlayerSocketConnection extends PlayerConnection {
     }
 
     record EncryptionContext(Cipher encrypt, Cipher decrypt) {
+    }
+    public boolean isHaProxy() {
+        return haProxy;
     }
 }

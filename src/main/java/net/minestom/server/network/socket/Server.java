@@ -2,12 +2,15 @@ package net.minestom.server.network.socket;
 
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.ServerFlag;
+import net.minestom.server.network.haproxy.HaProxyParser;
 import net.minestom.server.network.packet.PacketParser;
 import net.minestom.server.network.packet.PacketVanilla;
 import net.minestom.server.network.packet.client.ClientPacket;
 import net.minestom.server.network.player.PlayerSocketConnection;
 import net.minestom.server.utils.validate.Check;
 import org.jetbrains.annotations.ApiStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -19,7 +22,10 @@ import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static net.minestom.server.ServerFlag.HAPROXY_ENABLED;
+
 public final class Server {
+    private static final Logger log = LoggerFactory.getLogger(Server.class);
     private volatile boolean stop;
 
     private final PacketParser<ClientPacket> packetParser;
@@ -70,18 +76,41 @@ public final class Server {
         // Use named thread builders for logging
         var readBuilder = Thread.ofVirtual().name("Ms-Socket-Reader-", 0);
         var writeBuilder = Thread.ofVirtual().name("Ms-Socket-Writer-", 0);
+        var initBuilder = Thread.ofVirtual().name("Ms-Socket-Parser", 0);
         Thread.ofVirtual().name("Ms-Socket-Server").start(() -> {
             while (!stop) {
                 try {
                     final SocketChannel client = serverSocket.accept();
                     configureSocket(client);
-                    AtomicReference<PlayerSocketConnection> reference = new AtomicReference<>(null);
-                    Thread readThread = readBuilder.unstarted(() -> playerReadLoop(reference.get()));
-                    Thread writeThread = writeBuilder.unstarted(() -> playerWriteLoop(reference.get()));
-                    PlayerSocketConnection connection = new PlayerSocketConnection(client, client.getRemoteAddress(), readThread, writeThread);
-                    reference.set(connection);
-                    readThread.start();
-                    writeThread.start();
+                    initBuilder.start(() -> {
+                        try {
+                            boolean haproxy = false;
+                            SocketAddress remoteAddress = client.getRemoteAddress();
+                            if (HAPROXY_ENABLED) {
+                                remoteAddress = HaProxyParser.parseProxyProtocol(client);
+                                if (remoteAddress == null) {
+                                    client.close();
+                                    return;
+                                }
+                                haproxy = true;
+                            }
+                            AtomicReference<PlayerSocketConnection> reference = new AtomicReference<>(null);
+                            Thread readThread = readBuilder.unstarted(() -> playerReadLoop(reference.get()));
+                            Thread writeThread = writeBuilder.unstarted(() -> playerWriteLoop(reference.get()));
+                            PlayerSocketConnection connection = new PlayerSocketConnection(client, remoteAddress, readThread, writeThread, haproxy);
+                            reference.set(connection);
+                            readThread.start();
+                            writeThread.start();
+                        } catch (AsynchronousCloseException ignored) {
+                            // We are exiting, bye bye!
+                        } catch (IOException e) {
+                            log.error("Error while init player", e);
+                            try {
+                                client.close();
+                            } catch (IOException ignored) {
+                            }
+                        }
+                    });
                 } catch (AsynchronousCloseException ignored) {
                     // We are exiting, bye bye!
                 } catch (IOException e) {

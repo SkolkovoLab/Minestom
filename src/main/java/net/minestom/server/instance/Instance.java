@@ -922,6 +922,10 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
         this.scheduler.processTickEnd();
     }
 
+    public long getLastTickAge() {
+        return lastTickAge;
+    }
+
     /**
      * Gets the weather of this instance
      *

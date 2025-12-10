@@ -94,10 +94,6 @@ dependencies {
     implementation(libs.bundles.flare)
     api(libs.gson)
     implementation(libs.jcTools)
-
-    // Testing
-    testImplementation(libs.bundles.junit)
-    testImplementation(project(":testing"))
 }
 
 tasks {

@@ -1,9 +1,27 @@
 plugins {
-    id("minestom.java-library")
-    id("minestom.publishing")
+    `java-library`
     alias(libs.plugins.blossom)
+}
 
-    alias(libs.plugins.nmcp.aggregation)
+group = "net.minestom"
+version = "dev"
+description = "1.21 Lightweight Minecraft server"
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+configurations.all {
+    // We only use Jetbrains Annotations
+    exclude("org.checkerframework", "checker-qual")
+}
+
+java {
+    withSourcesJar()
+    withJavadocJar()
+
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
 }
 
 sourceSets {
@@ -14,24 +32,15 @@ sourceSets {
         }
         blossom {
             javaSources {
-                property("COMMIT", System.getenv("GITHUB_SHA") ?: "LOCAL")
-                property("BRANCH", System.getenv("GITHUB_REF") ?: "LOCAL")
-                property("GROUP", project.group.toString())
-                property("ARTIFACT", project.name)
+                val group = project.group as String?
+                val artifact = project.name as String?
+                property("COMMIT", "LOCAL")
+                property("BRANCH", "LOCAL")
+                property("GROUP", group ?: "UNKNOWN")
+                property("ARTIFACT", artifact ?: "UNKNOWN")
                 property("VERSION", project.version.toString())
             }
         }
-    }
-}
-
-tasks.register<Task>("determineMinecraftVersion") {
-    outputs.upToDateWhen { false } // Never cache
-
-    doLast {
-        val minestomDataVersion = libs.minestomData.get().version
-        if (minestomDataVersion == null || "-" !in minestomDataVersion)
-            throw IllegalStateException("Unable to determine Minecraft version from minestomData dependency")
-        println(minestomDataVersion.split("-")[0])
     }
 }
 
@@ -46,73 +55,30 @@ dependencies {
     implementation(libs.bundles.flare)
     api(libs.gson)
     implementation(libs.jcTools)
-
-    testImplementation(project(":testing"))
 }
 
-tasks.withType<JavaCompile> {
-    options.compilerArgs.add("-Xlint:-requires-transitive-automatic") // Adventure dependencies are automatic until 5.0.0, see https://github.com/KyoriPowered/adventure/issues/1287
-}
-
-// GraalVM Native Image configuration
-tasks.register<Test>("testWithAgent") {
-    group = "verification"
-    description = "Runs all tests with GraalVM native-image agent to generate metadata."
-
-    val metadataOutputDir = layout.buildDirectory.dir("native-image-metadata").get().asFile
-    val resourcesTargetDir = layout.projectDirectory.dir("src/main/resources/META-INF/native-image/net.minestom/minestom").asFile
-    val filterFile = layout.buildDirectory.file("agent-filter.json").get().asFile
-
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-
-    // Configure the native-image agent
-    jvmArgs(
-            "-agentlib:native-image-agent=config-output-dir=${metadataOutputDir.absolutePath},access-filter-file=${filterFile.absolutePath},caller-filter-file=${filterFile.absolutePath}"
-    )
-
-    doFirst {
-        delete(metadataOutputDir)
-        metadataOutputDir.mkdirs()
-
-        filterFile.parentFile.mkdirs()
-        filterFile.writeText("""
-{
-  "rules": [
-    {"excludeClasses": "org.junit.**"},
-    {"excludeClasses": "org.opentest4j.**"},
-    {"excludeClasses": "org.gradle.**"},
-    {"excludeClasses": "org.graalvm.**"},
-    {"excludeClasses": "net.minestom.testing.**"}
-  ],
-  "regexRules": [
-     {"excludeClasses": "net\\.minestom\\.server\\..*Test(\\$.*)?"}
-  ]
-}""")
-        println("Created filter file: ${filterFile.absolutePath}")
+tasks {
+    withType<Zip> {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
 
-    doLast {
-        resourcesTargetDir.mkdirs()
-        copy {
-            from(metadataOutputDir)
-            into(resourcesTargetDir)
+    withType<Test> {
+        useJUnitPlatform()
+
+        // Viewable packets make tracking harder. Could be re-enabled later.
+        jvmArgs("-Dminestom.viewable-packet=false")
+        jvmArgs("-Dminestom.inside-test=true")
+        minHeapSize = "512m"
+        maxHeapSize = "1024m"
+    }
+
+    withType<JavaCompile> {
+        options.encoding = "UTF-8"
+    }
+
+    jar {
+        manifest {
+            attributes("Automatic-Module-Name" to "net.minestom.server")
         }
-        println("✅ GraalVM metadata generated and copied to: $resourcesTargetDir")
     }
-}
-
-// Publishing configuration below
-
-nmcpAggregation {
-    centralPortal {
-        username = System.getenv("SONATYPE_USERNAME")
-        password = System.getenv("SONATYPE_PASSWORD")
-        publishingType = "AUTOMATIC"
-    }
-}
-
-dependencies {
-    nmcpAggregation(rootProject)
-    nmcpAggregation(project(":testing"))
 }

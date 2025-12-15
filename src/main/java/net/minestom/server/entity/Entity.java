@@ -2,7 +2,6 @@ package net.minestom.server.entity;
 
 import net.kyori.adventure.identity.Identified;
 import net.kyori.adventure.identity.Identity;
-import net.kyori.adventure.nbt.CompoundBinaryTag;
 import net.kyori.adventure.pointer.Pointered;
 import net.kyori.adventure.pointer.Pointers;
 import net.kyori.adventure.pointer.PointersSupplier;
@@ -538,8 +537,14 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
         player.sendPacket(getSpawnPacket());
         if (hasVelocity()) player.sendPacket(getVelocityPacket());
         player.sendPacket(this.getMetadataPacket());
-        // Passengers are handled in EntityView
-
+        // Passengers
+        final Set<Entity> passengers = this.passengers;
+        if (!passengers.isEmpty()) {
+            for (Entity passenger : passengers) {
+                if (passenger != player) passenger.updateNewViewer(player);
+            }
+            player.sendPacket(getPassengersPacket());
+        }
         // Leashes
         if (leashHolder != null && (player.equals(leashHolder) || leashHolder.isViewer(player))) {
             player.sendPacket(getAttachEntityPacket());
@@ -561,6 +566,12 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
      */
     @ApiStatus.Internal
     public void updateOldViewer(Player player) {
+        final Set<Entity> passengers = this.passengers;
+        if (!passengers.isEmpty()) {
+            for (Entity passenger : passengers) {
+                if (passenger != player) passenger.updateOldViewer(player);
+            }
+        }
         leashedEntities.forEach(entity -> player.sendPacket(new AttachEntityPacket(entity.getEntityId(), -1)));
         player.sendPacket(destroyPacketCache);
     }
@@ -1020,10 +1031,10 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
         this.passengers.add(entity);
         entity.vehicle = this;
         sendPacketToViewersAndSelf(getPassengersPacket());
+        // Updates the position of the new passenger, and then teleports the passenger
         updatePassengerPosition(position, entity);
         entity.synchronizePosition();
     }
-
 
     /**
      * Removes a passenger to this entity.
@@ -1619,6 +1630,9 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
             data = objectDataProvider.getObjectData();
             if (objectDataProvider.requiresVelocityPacketAtSpawn()) {
                 velocity = getVelocityForPacket();
+
+
+
             }
         }
         final Pos position = getPosition();

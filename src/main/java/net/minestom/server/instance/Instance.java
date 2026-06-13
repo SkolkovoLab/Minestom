@@ -1151,4 +1151,9 @@ public abstract class Instance implements Block.Getter, Block.Setter,
     public void destroyInstance() {
         MinecraftServer.getInstanceManager().unregisterInstance(this);
     }
+
+
+    public InstanceThread getThread() {
+        return thread;
+    }
 }

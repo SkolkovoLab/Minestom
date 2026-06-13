@@ -8,7 +8,7 @@ public class InstanceThread extends Thread {
     private long tickCounter = 0;
 
     public InstanceThread(Instance instance) {
-        super("Instance Thread " + instance.getNumber());
+        super("InstanceThread-" + instance.getNumber());
         this.instance = instance;
     }
 
@@ -16,7 +16,7 @@ public class InstanceThread extends Thread {
     public void run() {
         while (instance.isRegistered()) {
             var tickStart = System.currentTimeMillis();
-            instance.threadLoop(tickStart);
+            TickProfiler.Holder.get().profile(instance, () -> instance.threadLoop(tickStart));
             tickCounter++;
             var tickEnd = System.currentTimeMillis();
             instance.tickTime = (int) (tickEnd - tickStart);

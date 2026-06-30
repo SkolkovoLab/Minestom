@@ -8,6 +8,9 @@ import net.minestom.server.event.EventDispatcher;
 import net.minestom.server.event.ListenerHandle;
 import net.minestom.server.event.player.PlayerPacketOutEvent;
 import net.minestom.server.extras.mojangAuth.MojangCrypt;
+import net.minestom.server.extras.viaversion.ViaConnection;
+import net.minestom.server.extras.viaversion.ViaPacketSink;
+import net.minestom.server.extras.viaversion.ViaVersion;
 import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
 import net.minestom.server.network.packet.PacketParser;
@@ -54,7 +57,7 @@ import java.util.zip.DataFormatException;
  * It is the implementation used for all network client.
  */
 @ApiStatus.Internal
-public class PlayerSocketConnection extends PlayerConnection {
+public class PlayerSocketConnection extends PlayerConnection implements ViaPacketSink {
     private static final Set<Class<? extends ClientPacket>> IMMEDIATE_PROCESS_PACKETS = Set.of(
             ClientHandshakePacket.class, // First received packet
             ClientCookieResponsePacket.class,
@@ -84,6 +87,10 @@ public class PlayerSocketConnection extends PlayerConnection {
     private int protocolVersion;
 
     private final NetworkBuffer readBuffer = NetworkBuffer.resizableBuffer(ServerFlag.POOLED_BUFFER_SIZE, MinecraftServer.process());
+    // ViaVersion translation for this connection, or null if Via is not enabled.
+    private final ViaConnection viaConnection = ViaVersion.newConnection(this);
+    // Clientbound packets Via injected, already in the client's version; written verbatim, bypassing Via.
+    private final MessagePassingQueue<byte[]> injectedClientbound = ConcurrentMessageQueues.mpscUnboundedArrayQueue(16);
     private final MessagePassingQueue<SendablePacket> packetQueue = ConcurrentMessageQueues.mpscUnboundedArrayQueue(1024);
     private final Thread readThread, writeThread;
 
@@ -138,7 +145,8 @@ public class PlayerSocketConnection extends PlayerConnection {
                     readBuffer,
                     packetParser,
                     startingState, PacketVanilla::nextClientState,
-                    compression()
+                    compression(),
+                    viaConnection
             );
         } catch (DataFormatException e) {
             MinecraftServer.getExceptionManager().handleException(e);
@@ -148,28 +156,16 @@ public class PlayerSocketConnection extends PlayerConnection {
         switch (result) {
             case PacketReading.Result.Success<ClientPacket> success -> {
                 for (PacketReading.ParsedPacket<ClientPacket> parsedPacket : success.packets()) {
-                    final ClientPacket packet = parsedPacket.packet();
-
-                    try {
-                        final boolean processImmediately = IMMEDIATE_PROCESS_PACKETS.contains(packet.getClass());
-                        if (processImmediately) {
-                            // Interpret the packet using the connection state we received it.
-                            MinecraftServer.getPacketListenerManager().processClientPacket(packet, this);
-                        } else {
-                            // To be processed during the next player tick
-                            final Player player = getPlayer();
-                            assert player != null;
-                            player.addPacketToQueue(packet);
-                        }
-                    } catch (Exception e) {
-                        MinecraftServer.getExceptionManager().handleException(e);
-                    }
+                    handleClientPacket(parsedPacket.packet());
                 }
                 // Compact in case of incomplete read
                 readBuffer.compact();
             }
             case PacketReading.Result.Empty<ClientPacket> ignored -> {
                 // Empty
+            }
+            case PacketReading.Result.Skipped<ClientPacket> ignored -> {
+                // Dropped by ViaVersion inside readPackets; nothing to do.
             }
             case PacketReading.Result.Failure<ClientPacket> failure -> {
                 // Resize for next read
@@ -178,6 +174,52 @@ public class PlayerSocketConnection extends PlayerConnection {
                         "New capacity should be greater than the current one: " + requiredCapacity + " <= " + readBuffer.capacity();
                 readBuffer.resize(requiredCapacity);
             }
+        }
+    }
+
+    private void handleClientPacket(ClientPacket packet) {
+        try {
+            final boolean processImmediately = IMMEDIATE_PROCESS_PACKETS.contains(packet.getClass());
+            if (processImmediately) {
+                // Interpret the packet using the connection state we received it.
+                MinecraftServer.getPacketListenerManager().processClientPacket(packet, this);
+            } else {
+                // To be processed during the next player tick
+                final Player player = getPlayer();
+                assert player != null;
+                player.addPacketToQueue(packet);
+            }
+        } catch (Exception e) {
+            MinecraftServer.getExceptionManager().handleException(e);
+        }
+    }
+
+    @Override
+    public void sendInjectedClientbound(byte[] idAndData) {
+        this.injectedClientbound.relaxedOffer(idAndData);
+        unlockWriteThread();
+    }
+
+    @Override
+    public void dispatchInjectedServerbound(byte[] idAndData) {
+        // Buffers from PACKET_POOL are created with MinecraftServer.process() registries, identical to
+        // readBuffer's, so the framed payload reads back with the right registries without an extra setter.
+        final NetworkBuffer framed = PacketVanilla.PACKET_POOL.get();
+
+        try {
+            framed.write(NetworkBuffer.VAR_INT, idAndData.length);
+            framed.write(NetworkBuffer.RAW_BYTES, idAndData);
+            final PacketReading.Result<ClientPacket> result = PacketReading.readClient(framed, getClientState(), false);
+
+            if (result instanceof PacketReading.Result.Success<ClientPacket> success) {
+                for (PacketReading.ParsedPacket<ClientPacket> parsedPacket : success.packets()) {
+                    handleClientPacket(parsedPacket.packet());
+                }
+            }
+        } catch (Exception e) {
+            MinecraftServer.getExceptionManager().handleException(e);
+        } finally {
+            PacketVanilla.PACKET_POOL.add(framed);
         }
     }
 
@@ -335,6 +377,16 @@ public class PlayerSocketConnection extends PlayerConnection {
         final long start = buffer.writeIndex();
         final boolean result = writePacketSync(buffer, sendable, compressed);
         if (!result) return false;
+        // ViaVersion: translate the frame(s) we just wrote to the client's version, before encryption.
+        final ViaConnection viaConnection = this.viaConnection;
+        if (viaConnection != null && viaConnection.active()) {
+            try {
+                transformClientboundRegion(buffer, start, compressed);
+            } catch (IndexOutOfBoundsException exception) {
+                buffer.writeIndex(start);
+                return false;
+            }
+        }
         // Encrypt data
         final long length = buffer.writeIndex() - start;
         final EncryptionContext encryptionContext = this.encryptionContext;
@@ -342,6 +394,78 @@ public class PlayerSocketConnection extends PlayerConnection {
             buffer.cipher(encryptionContext.encrypt(), start, length);
         }
         return true;
+    }
+
+    // Translates every frame in [start, writeIndex) to the client's version: unwrap each to its
+    // [packet id][payload] body (decompressing if needed), transform it, and re-frame.
+    private void transformClientboundRegion(NetworkBuffer buffer, long start, boolean compressed) {
+        final ViaConnection viaConnection = this.viaConnection;
+        final long end = buffer.writeIndex();
+        final int compressionThreshold = compressed ? MinecraftServer.getCompressionThreshold() : 0;
+        final long savedReadIndex = buffer.readIndex();
+        final NetworkBuffer scratch = PacketVanilla.PACKET_POOL.get();
+        NetworkBuffer decompressed = null;
+        try {
+            long cursor = start;
+            while (cursor < end) {
+                buffer.readIndex(cursor);
+                final int frameLength = buffer.read(NetworkBuffer.VAR_INT);
+                final long payloadStart = buffer.readIndex();
+                final long payloadEnd = payloadStart + frameLength;
+
+                // Resolve the uncompressed [packet id][payload] body for this frame.
+                final NetworkBuffer body;
+                final long bodyFrom;
+                final long bodyTo;
+                if (compressionThreshold <= 0) {
+                    body = buffer;
+                    bodyFrom = payloadStart;
+                    bodyTo = payloadEnd;
+                } else {
+                    final int dataLength = buffer.read(NetworkBuffer.VAR_INT);
+                    final long afterDataLength = buffer.readIndex();
+                    if (dataLength == 0) {
+                        body = buffer;
+                        bodyFrom = afterDataLength;
+                        bodyTo = payloadEnd;
+                    } else {
+                        if (decompressed == null) decompressed = PacketVanilla.PACKET_POOL.get();
+                        decompressed.clear();
+                        if (decompressed.capacity() < dataLength) decompressed.resize(dataLength);
+                        buffer.decompress(afterDataLength, payloadEnd - afterDataLength, decompressed);
+                        body = decompressed;
+                        bodyFrom = 0;
+                        bodyTo = decompressed.writeIndex();
+                    }
+                }
+
+                final ViaConnection.ClientboundResult result = viaConnection.transformClientbound(body, bodyFrom, bodyTo);
+                // Packets Via injected while handling this frame (e.g. world_clock before finish_configuration)
+                // must reach the client first, then the transformed frame itself.
+                for (byte[] injected : result.injectedBefore()) {
+                    final NetworkBuffer content = NetworkBuffer.wrap(injected, 0, injected.length, buffer.registries());
+                    PacketWriting.writeFramedRaw(scratch, content, 0, injected.length, compressionThreshold);
+                }
+                final byte[] transformed = result.output();
+                if (transformed != null) {
+                    final NetworkBuffer content = NetworkBuffer.wrap(transformed, 0, transformed.length, buffer.registries());
+                    PacketWriting.writeFramedRaw(scratch, content, 0, transformed.length, compressionThreshold);
+                }
+                cursor = payloadEnd;
+            }
+            // Replace the original framed region with the transformed frames.
+            final long newLength = scratch.writeIndex();
+            buffer.writeIndex(start);
+            buffer.ensureWritable(newLength);
+            NetworkBuffer.copy(scratch, 0, buffer, start, newLength);
+            buffer.advanceWrite(newLength);
+        } catch (java.util.zip.DataFormatException exception) {
+            throw new RuntimeException("Failed to transform clientbound packet with ViaVersion", exception);
+        } finally {
+            buffer.readIndex(savedReadIndex);
+            PacketVanilla.PACKET_POOL.add(scratch);
+            if (decompressed != null) PacketVanilla.PACKET_POOL.add(decompressed);
+        }
     }
 
     private boolean writePacketSync(NetworkBuffer buffer, SendablePacket packet, boolean compressed) {
@@ -432,7 +556,7 @@ public class PlayerSocketConnection extends PlayerConnection {
         }
         // Consume queued packets
         var packetQueue = this.packetQueue;
-        if (packetQueue.isEmpty()) {
+        if (packetQueue.isEmpty() && injectedClientbound.isEmpty()) {
             if (!ServerFlag.FASTER_SOCKET_WRITES) {
                 try {
                     // Can probably be improved by waking up at the end of the tick
@@ -446,11 +570,13 @@ public class PlayerSocketConnection extends PlayerConnection {
                 this.writeSignaled.set(false);
                 if (!isOnline()) return; // already offline, don't park
                 LockSupport.park(this);
-                if (packetQueue.isEmpty()) return; // woken by disconnect signal, not by packets
+                if (packetQueue.isEmpty() && injectedClientbound.isEmpty()) return; // woken by disconnect signal
             }
         }
         if (!channel.isConnected()) throw new EOFException("Channel is closed");
         NetworkBuffer buffer = PacketVanilla.PACKET_POOL.get();
+        // ViaVersion-injected packets first (already in the client's version).
+        writeInjectedClientbound(buffer);
         // Write to buffer
         PacketWriting.writeQueue(buffer, packetQueue, 1, (b, packet) -> {
             final boolean compressed = sentPacketCounter.get() > compressionStart;
@@ -463,6 +589,24 @@ public class PlayerSocketConnection extends PlayerConnection {
         // Keep the buffer if not fully written
         if (success) PacketVanilla.PACKET_POOL.add(buffer);
         else this.writeLeftover = buffer;
+    }
+
+    private void writeInjectedClientbound(NetworkBuffer buffer) {
+        byte[] idAndData;
+        while ((idAndData = injectedClientbound.poll()) != null) {
+            final long start = buffer.writeIndex();
+            final boolean compressed = sentPacketCounter.get() > compressionStart;
+            final int compressionThreshold = compressed ? MinecraftServer.getCompressionThreshold() : 0;
+            buffer.ensureWritable(idAndData.length + 15); // headroom for length + data-length + id varints
+            final NetworkBuffer content = NetworkBuffer.wrap(idAndData, 0, idAndData.length);
+            PacketWriting.writeFramedRaw(buffer, content, 0, idAndData.length, compressionThreshold);
+            final long length = buffer.writeIndex() - start;
+            final EncryptionContext encryptionContext = this.encryptionContext;
+            if (encryptionContext != null && length > 0) {
+                buffer.cipher(encryptionContext.encrypt(), start, length);
+            }
+            sentPacketCounter.getAndIncrement();
+        }
     }
 
     @Override

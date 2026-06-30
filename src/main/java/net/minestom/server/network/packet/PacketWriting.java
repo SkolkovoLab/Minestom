@@ -74,6 +74,34 @@ public final class PacketWriting {
         else writeCompressedFormat(buffer, type, id, packet, compressionThreshold);
     }
 
+    /**
+     * Frames an already serialized {@code [packet id][payload]} body (length prefix and optional compression).
+     * Used to re-frame a body rewritten by an external transform (ViaVersion), where it is bytes, not a packet.
+     */
+    public static void writeFramedRaw(NetworkBuffer buffer,
+                                      NetworkBuffer body, long bodyStart, long bodyLength,
+                                      int compressionThreshold) throws IndexOutOfBoundsException {
+        if (compressionThreshold <= 0) {
+            final long lengthIndex = buffer.advanceWrite(3);
+            NetworkBuffer.copy(body, bodyStart, buffer, buffer.writeIndex(), bodyLength);
+            buffer.advanceWrite(bodyLength);
+            buffer.writeAt(lengthIndex, NetworkBuffer.VAR_INT_3, (int) bodyLength);
+            return;
+        }
+        final long compressedIndex = buffer.advanceWrite(3);
+        final long uncompressedIndex = buffer.advanceWrite(3);
+        final long contentStart = buffer.writeIndex();
+        final boolean compressed = bodyLength >= compressionThreshold;
+        if (compressed) {
+            body.compress(bodyStart, bodyLength, buffer);
+        } else {
+            NetworkBuffer.copy(body, bodyStart, buffer, contentStart, bodyLength);
+            buffer.advanceWrite(bodyLength);
+        }
+        buffer.writeAt(compressedIndex, NetworkBuffer.VAR_INT_3, (int) (buffer.writeIndex() - uncompressedIndex));
+        buffer.writeAt(uncompressedIndex, NetworkBuffer.VAR_INT_3, compressed ? (int) bodyLength : 0);
+    }
+
     private static <T> void writeUncompressedFormat(NetworkBuffer buffer,
                                                     NetworkBuffer.Type<? super T> type,
                                                     int id, T packet) throws IndexOutOfBoundsException {

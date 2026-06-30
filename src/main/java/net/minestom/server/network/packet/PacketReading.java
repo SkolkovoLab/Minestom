@@ -1,11 +1,13 @@
 package net.minestom.server.network.packet;
 
 import net.minestom.server.ServerFlag;
+import net.minestom.server.extras.viaversion.ViaConnection;
 import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
 import net.minestom.server.network.packet.client.ClientPacket;
 import net.minestom.server.network.packet.server.ServerPacket;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,6 +67,12 @@ public final class PacketReading {
          */
         record Failure<T>(long requiredCapacity) implements Result<T> {
         }
+
+        /**
+         * A packet was read but dropped by a transform (ViaVersion cancelled it). Bytes consumed; keep reading.
+         */
+        record Skipped<T>() implements Result<T> {
+        }
     }
 
     public record ParsedPacket<T>(ConnectionState nextState, T packet) {
@@ -93,17 +101,31 @@ public final class PacketReading {
             BiFunction<T, ConnectionState, ConnectionState> stateUpdater,
             boolean compressed
     ) throws DataFormatException {
+        return readPackets(buffer, parser, state, stateUpdater, compressed, null);
+    }
+
+    public static <T> Result<T> readPackets(
+            NetworkBuffer buffer,
+            PacketParser<T> parser,
+            ConnectionState state,
+            BiFunction<T, ConnectionState, ConnectionState> stateUpdater,
+            boolean compressed,
+            @Nullable ViaConnection via
+    ) throws DataFormatException {
         List<ParsedPacket<T>> packets = new ArrayList<>();
         readLoop:
         while (buffer.readableBytes() > 0) {
-            final Result<T> result = readPacket(buffer, parser, state, stateUpdater, compressed);
-            if (buffer.readableBytes() == 0 && packets.isEmpty()) return result;
+            final Result<T> result = readPacket(buffer, parser, state, stateUpdater, compressed, via);
+            if (!(result instanceof Result.Skipped) && buffer.readableBytes() == 0 && packets.isEmpty()) return result;
             switch (result) {
                 case Result.Success<T> success -> {
                     assert success.packets().size() == 1;
                     final ParsedPacket<T> parsedPacket = success.packets().getFirst();
                     packets.add(parsedPacket);
                     state = parsedPacket.nextState();
+                }
+                case Result.Skipped<T> ignored -> {
+                    // Packet was dropped by the transform; keep reading the rest of the buffer.
                 }
                 case Result.Empty<T> ignored -> {
                     break readLoop;
@@ -139,6 +161,17 @@ public final class PacketReading {
             BiFunction<T, ConnectionState, ConnectionState> stateUpdater,
             boolean compressed
     ) throws DataFormatException {
+        return readPacket(buffer, parser, state, stateUpdater, compressed, null);
+    }
+
+    public static <T> Result<T> readPacket(
+            NetworkBuffer buffer,
+            PacketParser<T> parser,
+            ConnectionState state,
+            BiFunction<T, ConnectionState, ConnectionState> stateUpdater,
+            boolean compressed,
+            @Nullable ViaConnection via
+    ) throws DataFormatException {
         final long beginMark = buffer.readIndex();
         // READ PACKET LENGTH
         final int packetLength;
@@ -173,24 +206,30 @@ public final class PacketReading {
         final long writerEnd = buffer.writeIndex();
         buffer.writeIndex(readerEnd);
         final PacketRegistry<? extends T> registry = parser.stateRegistry(state);
-        final T packet = readFramedPacket(buffer, registry, compressed);
+        final T packet = readFramedPacket(buffer, registry, compressed, via);
+        if (packet == null) {
+            // ViaVersion cancelled this packet; consume its bytes and skip it.
+            buffer.index(readerEnd, writerEnd);
+            return new Result.Skipped<>();
+        }
         final ConnectionState nextState = stateUpdater.apply(packet, state);
         buffer.index(readerEnd, writerEnd);
         return new Result.Success<>(new ParsedPacket<>(nextState, packet));
     }
 
-    private static <T> T readFramedPacket(NetworkBuffer buffer,
-                                          PacketRegistry<T> registry,
-                                          boolean compressed) throws DataFormatException {
+    private static <T> @Nullable T readFramedPacket(NetworkBuffer buffer,
+                                                    PacketRegistry<T> registry,
+                                                    boolean compressed,
+                                                    @Nullable ViaConnection via) throws DataFormatException {
         if (!compressed) {
             // No compression format
-            return readPayload(buffer, registry);
+            return viaReadPayload(buffer, registry, via);
         }
 
         final int dataLength = buffer.read(VAR_INT);
         if (dataLength == 0) {
             // Uncompressed packet
-            return readPayload(buffer, registry);
+            return viaReadPayload(buffer, registry, via);
         }
 
         // Decompress the packet into the pooled buffer
@@ -199,10 +238,22 @@ public final class PacketReading {
         try {
             if (decompressed.capacity() < dataLength) decompressed.resize(dataLength);
             buffer.decompress(buffer.readIndex(), buffer.readableBytes(), decompressed);
-            return readPayload(decompressed, registry);
+            return viaReadPayload(decompressed, registry, via);
         } finally {
             PacketVanilla.PACKET_POOL.add(decompressed);
         }
+    }
+
+    // Reads a payload, first translating it through ViaVersion if active. The buffer holds the uncompressed
+    // [packet id][payload] in [readIndex, writeIndex). Returns null if Via dropped the packet.
+    private static <T> @Nullable T viaReadPayload(NetworkBuffer buffer, PacketRegistry<T> registry, @Nullable ViaConnection via) {
+        if (via != null && via.active()) {
+            final byte[] transformed = via.transformServerbound(buffer, buffer.readIndex(), buffer.writeIndex());
+            if (transformed == null) return null;
+            final NetworkBuffer payload = NetworkBuffer.wrap(transformed, 0, transformed.length, buffer.registries());
+            return readPayload(payload, registry);
+        }
+        return readPayload(buffer, registry);
     }
 
     private static <T> T readPayload(NetworkBuffer buffer, PacketRegistry<T> registry) {

@@ -1,6 +1,7 @@
 plugins {
     `java-library`
     alias(libs.plugins.blossom)
+    alias(libs.plugins.extraJavaModuleInfo)
 }
 
 group = "net.minestom"
@@ -10,6 +11,14 @@ description = "1.21 Lightweight Minecraft server"
 repositories {
     mavenLocal()
     mavenCentral()
+    maven("https://repo.viaversion.com")
+}
+
+extraJavaModuleInfo {
+    // ViaVersion/ViaBackwards ship as plain (non-modular) jars; place them on the module path as automatic modules.
+    failOnMissingModuleInfo = false
+    automaticModule("com.viaversion:viaversion", "viaversion")
+    automaticModule("com.viaversion:viabackwards", "viabackwards")
 }
 
 configurations.all {
@@ -55,6 +64,21 @@ dependencies {
     implementation(libs.bundles.flare)
     api(libs.gson)
     implementation(libs.jcTools)
+
+    // ViaVersion (multi-version client support)
+    api(libs.viaversion)
+    api(libs.viabackwards)
+    implementation(libs.netty.buffer)
+    implementation(libs.netty.transport)
+    implementation(libs.netty.codec)
+
+    implementation(libs.guava) {
+        exclude(group = "com.google.code.findbugs")
+        exclude(group = "org.checkerframework")
+        exclude(group = "com.google.errorprone")
+        exclude(group = "com.google.j2objc")
+        exclude(group = "com.google.guava", module = "listenablefuture")
+    }
 }
 
 tasks {

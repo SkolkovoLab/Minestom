@@ -14,6 +14,11 @@ flare = "2.0.1"
 gson = "2.14.0"
 jcTools = "4.0.6"
 
+# ViaVersion
+viaversion = "5.10.0"
+netty = "4.1.118.Final"
+guava = "33.4.0-jre"
+
 # Quality
 junit-jupiter = "6.0.3"
 junit-platform = "6.0.3"
@@ -32,6 +37,7 @@ blossom = "2.2.0"
 nmcp = "1.5.0"
 jmh-plugin = "0.7.3"
 jcstress-plugin = "0.9.0"
+extraJavaModuleInfo = "1.12"
 
 [libraries]
 
@@ -56,6 +62,14 @@ flare = { group = "space.vectrix.flare", name = "flare", version.ref = "flare" }
 flare-fastutil = { group = "space.vectrix.flare", name = "flare-fastutil", version.ref = "flare" }
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 jcTools = { group = "org.jctools", name = "jctools-core", version.ref = "jcTools" }
+
+# ViaVersion
+viaversion = { group = "com.viaversion", name = "viaversion", version.ref = "viaversion" }
+viabackwards = { group = "com.viaversion", name = "viabackwards", version.ref = "viaversion" }
+netty-buffer = { group = "io.netty", name = "netty-buffer", version.ref = "netty" }
+netty-transport = { group = "io.netty", name = "netty-transport", version.ref = "netty" }
+netty-codec = { group = "io.netty", name = "netty-codec", version.ref = "netty" }
+guava = { group = "com.google.guava", name = "guava", version.ref = "guava" }
 
 # Code quality
 junit-api = { group = "org.junit.jupiter", name = "junit-jupiter-api", version.ref = "junit-jupiter" }
@@ -88,3 +102,4 @@ jmh-plugin = { id = "me.champeau.jmh", version.ref = "jmh-plugin" }
 jcstress-plugin = { id = "io.github.reyerizo.gradle.jcstress", version.ref = "jcstress-plugin" }
 nmcp = { id = "com.gradleup.nmcp", version.ref = "nmcp" }
 nmcp-aggregation = { id = "com.gradleup.nmcp.aggregation", version.ref = "nmcp" }
+extraJavaModuleInfo = { id = "org.gradlex.extra-java-module-info", version.ref = "extraJavaModuleInfo" }

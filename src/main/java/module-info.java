@@ -18,6 +18,14 @@ module net.minestom.server {
     requires jdk.jfr;
     requires java.desktop;
     requires java.management;
+    requires java.logging;
+
+    // ViaVersion (multi-version client support)
+    requires viaversion;
+    requires viabackwards;
+    requires io.netty.buffer;
+    requires io.netty.codec;
+    requires io.netty.transport;
 
     // EXPORTS
     exports net.minestom.server;
@@ -91,6 +99,7 @@ module net.minestom.server {
     exports net.minestom.server.extras.query;
     exports net.minestom.server.extras.query.event;
     exports net.minestom.server.extras.query.response;
+    exports net.minestom.server.extras.viaversion;
     exports net.minestom.server.game;
     exports net.minestom.server.gamedata;
     exports net.minestom.server.instance;

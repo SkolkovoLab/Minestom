@@ -46,6 +46,7 @@ import java.nio.channels.SocketChannel;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
@@ -72,7 +73,12 @@ public class PlayerSocketConnection extends PlayerConnection implements ViaPacke
             ClientFinishConfigurationPacket.class // Enter play state
     );
 
+    // Pause taken by the write loop when the socket cannot accept more data, instead of retrying immediately.
+    private static final long WRITE_BACKOFF_NANOS = TimeUnit.MILLISECONDS.toNanos(
+            Long.getLong("minestom.write-backoff-millis", 5));
+
     private final SocketChannel channel;
+    private final AtomicBoolean channelClosed = new AtomicBoolean();
     private SocketAddress remoteAddress;
 
     //Could be null. Only used for Mojang Auth
@@ -550,7 +556,11 @@ public class PlayerSocketConnection extends PlayerConnection implements ViaPacke
                 this.writeLeftover = null;
                 PacketVanilla.PACKET_POOL.add(leftover);
             } else {
-                // Failed to write the whole leftover, try again next flush
+                // Failed to write the whole leftover, try again next flush.
+                // Returning straight away would spin the write loop at 100% CPU for as long as the client
+                // stays behind. These loops run on virtual threads, so a handful of slow clients would pin
+                // every carrier and starve the readers of every other connection.
+                backoff();
                 return;
             }
         }
@@ -584,11 +594,22 @@ public class PlayerSocketConnection extends PlayerConnection implements ViaPacke
             if (success) sentPacketCounter.getAndIncrement();
             return success;
         });
+        if (buffer.writeIndex() == 0 && !packetQueue.isEmpty()) {
+            // Nothing could be written even though packets are queued, which means the head packet does not
+            // fit in a max-size buffer and never will. It stays queued (dropping it silently would hide a
+            // protocol bug), but we must not spin on it.
+            backoff();
+        }
         // Write to channel
         final boolean success = buffer.writeChannel(channel);
         // Keep the buffer if not fully written
         if (success) PacketVanilla.PACKET_POOL.add(buffer);
         else this.writeLeftover = buffer;
+    }
+
+    // Yields the carrier thread for a moment instead of retrying a write that cannot make progress yet.
+    private void backoff() {
+        LockSupport.parkNanos(this, WRITE_BACKOFF_NANOS);
     }
 
     private void writeInjectedClientbound(NetworkBuffer buffer) {
@@ -613,6 +634,40 @@ public class PlayerSocketConnection extends PlayerConnection implements ViaPacke
     public void disconnect() {
         super.disconnect();
         LockSupport.unpark(writeThread);
+    }
+
+    /**
+     * Half-closes the socket once the last packet has been flushed.
+     * <p>
+     * A plain {@link SocketChannel#close()} here is answered with RST rather than FIN whenever the client
+     * still has bytes sitting unread in our receive queue, and RST discards the send buffer - so the
+     * disconnect packet we just wrote never reaches the client, which reports a bare connection reset.
+     * Sending FIN first lets the client read the reason; {@link #closeChannel()} finishes the job once the
+     * client answers, or once the linger deadline expires.
+     */
+    public void finishOutput() throws IOException {
+        if (channelClosed.get() || !channel.isOpen()) return;
+        try {
+            channel.shutdownOutput();
+        } catch (IOException ignored) {
+            // Peer already went away, nothing graceful left to do.
+            closeChannel();
+        }
+    }
+
+    /**
+     * Closes the socket and releases the per-connection ViaVersion state. Safe to call more than once.
+     */
+    public void closeChannel() {
+        if (!channelClosed.compareAndSet(false, true)) return;
+        try {
+            channel.close();
+        } catch (IOException ignored) {
+            // Already gone.
+        } finally {
+            final ViaConnection viaConnection = this.viaConnection;
+            if (viaConnection != null) viaConnection.close();
+        }
     }
 
     public Thread readThread() {

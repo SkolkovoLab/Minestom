@@ -20,13 +20,26 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static net.minestom.server.ServerFlag.HAPROXY_ENABLED;
 
 public final class Server {
     private static final Logger log = LoggerFactory.getLogger(Server.class);
+    // How long a half-closed connection may wait for the client to answer our FIN before we close anyway.
+    private static final long CLOSE_LINGER_MILLIS = Long.getLong("minestom.close-linger-millis", 10_000);
+
     private volatile boolean stop;
+
+    // Bounds the half-close above; a client that never answers the FIN must not pin a socket forever.
+    private final ScheduledExecutorService closeWatchdog = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "Ms-Socket-Close-Watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final PacketParser.Client packetParser;
 
@@ -132,21 +145,29 @@ public final class Server {
 
     private void playerReadLoop(PlayerSocketConnection connection) {
         Check.notNull(connection, "connection cannot be null");
-        while (!stop) {
-            try {
-                // Read & process packets
-                connection.read(packetParser);
-            } catch (ClosedChannelException ignored) {
-                break; // We closed the socket during read, just exit.
-            } catch (EOFException e) {
-                connection.disconnect();
-                break;
-            } catch (Throwable e) {
-                boolean isExpected = e instanceof SocketException && e.getMessage().equals("Connection reset");
-                if (!isExpected) MinecraftServer.getExceptionManager().handleException(e);
-                connection.disconnect();
-                break;
+        try {
+            while (!stop) {
+                try {
+                    // Read & process packets
+                    connection.read(packetParser);
+                } catch (ClosedChannelException ignored) {
+                    break; // We closed the socket during read, just exit.
+                } catch (EOFException e) {
+                    connection.disconnect();
+                    break;
+                } catch (Throwable e) {
+                    boolean isExpected = e instanceof SocketException && "Connection reset".equals(e.getMessage());
+                    if (!isExpected) MinecraftServer.getExceptionManager().handleException(e);
+                    connection.disconnect();
+                    break;
+                }
             }
+        } finally {
+            // The reader is the only thread that drains the receive queue, so it is the only one that can
+            // close without leaving unread bytes behind. Closing with bytes still queued makes the kernel
+            // answer with RST instead of FIN, which also discards the send buffer holding the disconnect
+            // packet - the client then reports a bare connection reset with no reason.
+            connection.closeChannel();
         }
     }
 
@@ -161,7 +182,7 @@ public final class Server {
                 connection.disconnect();
                 break;
             } catch (Throwable e) {
-                boolean isExpected = e instanceof IOException && e.getMessage().equals("Broken pipe");
+                boolean isExpected = e instanceof IOException && "Broken pipe".equals(e.getMessage());
                 if (!isExpected) MinecraftServer.getExceptionManager().handleException(e);
 
                 connection.disconnect();
@@ -170,10 +191,13 @@ public final class Server {
             if (!connection.isOnline()) {
                 try {
                     connection.flushSync();
-                    connection.getChannel().close();
+                    // Half-close only: FIN lets the client read everything we just flushed, including the
+                    // disconnect reason. The reader closes for real once the client answers.
+                    connection.finishOutput();
+                    closeWatchdog.schedule(connection::closeChannel, CLOSE_LINGER_MILLIS, TimeUnit.MILLISECONDS);
                     break;
                 } catch (IOException e) {
-                    // Disconnect
+                    connection.closeChannel();
                     break;
                 }
             }
@@ -187,6 +211,7 @@ public final class Server {
 
     public void stop() {
         this.stop = true;
+        this.closeWatchdog.shutdownNow();
         try {
             if (serverSocket != null) {
                 this.serverSocket.close();

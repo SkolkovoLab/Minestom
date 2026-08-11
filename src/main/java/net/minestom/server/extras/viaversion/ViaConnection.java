@@ -1,5 +1,6 @@
 package net.minestom.server.extras.viaversion;
 
+import com.viaversion.viaversion.api.Via;
 import com.viaversion.viaversion.api.connection.UserConnection;
 import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
 import com.viaversion.viaversion.connection.UserConnectionImpl;
@@ -170,5 +171,21 @@ public final class ViaConnection {
 
     public UserConnection user() {
         return this.user;
+    }
+
+    /**
+     * Releases the Via state held for this connection.
+     * <p>
+     * Via registers every server-side {@link UserConnection} in its global connection manager on login
+     * success and normally drops it again through the close listener of a real Netty pipeline. The
+     * {@link EmbeddedChannel} used here is never closed by Via itself, so without this call each connection
+     * leaks its whole protocol pipeline, and every reconnect of the same player logs a duplicate-UUID
+     * warning because the stale entry is still registered.
+     */
+    public void close() {
+        synchronized (this.lock) {
+            Via.getManager().getConnectionManager().onDisconnect(this.user);
+            this.channel.finishAndReleaseAll();
+        }
     }
 }

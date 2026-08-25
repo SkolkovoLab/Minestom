@@ -80,6 +80,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
@@ -96,6 +97,9 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
     static final int MAX_COORDINATE = 2_000_000_000;
 
     private static final AtomicInteger LAST_ENTITY_ID = new AtomicInteger();
+
+    private static final AtomicReferenceFieldUpdater<Entity, Scheduler> SCHEDULER_UPDATER =
+            AtomicReferenceFieldUpdater.newUpdater(Entity.class, Scheduler.class, "scheduler");
 
     // Protected due to PointersSupplier.Builder#parent
     protected static PointersSupplier<Entity> ENTITY_POINTERS_SUPPLIER = PointersSupplier.<Entity>builder()
@@ -167,7 +171,9 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
     protected final EntityView viewEngine = new EntityView(this);
     protected final Set<Player> viewers = viewEngine.set;
     private final TagHandler tagHandler = TagHandler.newHandler();
-    private final Scheduler scheduler = Scheduler.newScheduler();
+    // Каждый SchedulerImpl держит две Mpsc-очереди с буфером Object[128] (~2 КБ на сущность).
+    // Подавляющее большинство сущностей ничего не планирует, поэтому создаём по требованию.
+    private volatile Scheduler scheduler;
     private final EventNode<EntityEvent> eventNode;
 
     private final UUID uuid;
@@ -249,7 +255,7 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
      * @param callback the task to execute during the next entity tick
      */
     public void scheduleNextTick(Consumer<? super Entity> callback) {
-        this.scheduler.scheduleNextTick(() -> callback.accept(this));
+        scheduler().scheduleNextTick(() -> callback.accept(this));
     }
 
     /**
@@ -627,7 +633,8 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
             return;
 
         // scheduled tasks
-        this.scheduler.processTick();
+        final Scheduler scheduler = this.scheduler;
+        if (scheduler != null) scheduler.processTick();
         if (isRemoved()) return;
 
         // Entity tick
@@ -655,7 +662,8 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
             } else synchronizeView();
         }
         // End of tick scheduled tasks
-        this.scheduler.processTickEnd();
+        final Scheduler tickEndScheduler = this.scheduler;
+        if (tickEndScheduler != null) tickEndScheduler.processTickEnd();
     }
 
     @ApiStatus.Internal
@@ -1635,7 +1643,7 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
     }
 
     private void scheduleRemove(TaskSchedule schedule) {
-        this.scheduler.buildTask(this::remove).delay(schedule).schedule();
+        scheduler().buildTask(this::remove).delay(schedule).schedule();
     }
 
     protected Vec getVelocityForPacket() {
@@ -1734,7 +1742,10 @@ public class Entity implements Viewable, Tickable, Schedulable, Snapshotable, Ev
 
     @Override
     public Scheduler scheduler() {
-        return scheduler;
+        final Scheduler current = this.scheduler;
+        if (current != null) return current;
+        final Scheduler created = Scheduler.newScheduler();
+        return SCHEDULER_UPDATER.compareAndSet(this, null, created) ? created : this.scheduler;
     }
 
     @Override

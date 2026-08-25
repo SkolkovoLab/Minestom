@@ -175,6 +175,8 @@ non-sealed class EventNodeImpl<T extends Event> implements EventNode<T> {
     @Override
     public void unmap(Object value) {
         synchronized (GLOBAL_CHILD_LOCK) {
+            // Иначе повторный map() того же значения вернёт из кеша уже отвязанный узел.
+            this.mappedNodeCache.remove(value);
             Map<Object, WeakReference<EventNodeLazyImpl<T>>> registered = new WeakHashMap<>(registeredMappedNode);
             final WeakReference<EventNodeLazyImpl<T>> mappedNodeRef = registered.remove(value);
             this.registeredMappedNode = registered;

@@ -579,7 +579,10 @@ public class PlayerSocketConnection extends PlayerConnection implements ViaPacke
                 assert this.writeThread == Thread.currentThread(): "writeThread should be the current thread";
                 this.writeSignaled.set(false);
                 if (!isOnline()) return; // already offline, don't park
-                LockSupport.park(this);
+                // A producer may have queued work after the first empty check while
+                // writeSignaled was still true. Recheck after arming the wakeup;
+                // otherwise that packet can wait indefinitely for a second send.
+                if (packetQueue.isEmpty() && injectedClientbound.isEmpty()) LockSupport.park(this);
                 if (packetQueue.isEmpty() && injectedClientbound.isEmpty()) return; // woken by disconnect signal
             }
         }

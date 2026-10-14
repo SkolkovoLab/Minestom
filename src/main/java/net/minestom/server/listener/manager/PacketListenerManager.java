@@ -119,6 +119,11 @@ public final class PacketListenerManager {
      * @param <T>        the packet type
      */
     public <T extends ClientPacket> void processClientPacket(T packet, PlayerConnection connection) {
+        processClientPacketWithResult(packet, connection);
+    }
+
+    /** True when the native listener ran successfully after validation. */
+    public <T extends ClientPacket> boolean processClientPacketWithResult(T packet, PlayerConnection connection) {
         // Update connection state 'as we receive' the packet, aka before we send any responses
         // from processing. This is important for sending packets in response which are state-dependent.
         final ConnectionState currState = connection.getClientState();
@@ -131,7 +136,7 @@ public final class PacketListenerManager {
         // Listener can be null if none has been set before, call PacketConsumer anyway
         if (packetListenerConsumer == null) {
             LOGGER.warn("Packet {}:{} does not have any default listener! (The issue likely comes from Minestom)", clazz, currState);
-            return;
+            return false;
         }
 
         // Event
@@ -139,16 +144,18 @@ public final class PacketListenerManager {
             PlayerPacketEvent playerPacketEvent = new PlayerPacketEvent(connection.getPlayer(), packet);
             EventDispatcher.call(playerPacketEvent);
             if (playerPacketEvent.isCancelled()) {
-                return;
+                return false;
             }
         }
 
         // Finally execute the listener
         try {
             packetListenerConsumer.accept(packet, connection);
+            return true;
         } catch (Exception e) {
             // Packet is likely invalid
             MinecraftServer.getExceptionManager().handleException(e);
+            return false;
         }
     }
 

@@ -2171,8 +2171,20 @@ public class Player extends LivingEntity implements CommandSender, HoverEventSou
     public void interpretPlayPacketQueue() {
         final PacketListenerManager manager = MinecraftServer.getPacketListenerManager();
         // This method is NOT thread-safe
-        this.playPackets.drain(packet -> manager.processClientPacket(packet, playerConnection), ServerFlag.PLAYER_PACKET_PER_TICK);
+        this.playPackets.drain(this::processPlayPacket, ServerFlag.PLAYER_PACKET_PER_TICK);
     }
+
+    /** Extension point around one native play packet, preserving queue order. */
+    protected void processPlayPacket(ClientPacket packet) {
+        boolean applied = false;
+        try {
+            applied = MinecraftServer.getPacketListenerManager().processClientPacketWithResult(packet, playerConnection);
+        } finally {
+            onPlayPacketProcessed(packet, applied);
+        }
+    }
+
+    protected void onPlayPacketProcessed(ClientPacket packet, boolean applied) {}
 
     /**
      * Changes the storage player latency and update its tab value.

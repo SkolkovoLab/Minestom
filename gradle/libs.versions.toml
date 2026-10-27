@@ -15,7 +15,7 @@ gson = "2.14.0"
 jcTools = "4.0.6"
 
 # ViaVersion
-viaversion = "5.10.0"
+viaversion = "5.12.1"
 netty = "4.1.118.Final"
 guava = "33.4.0-jre"
 

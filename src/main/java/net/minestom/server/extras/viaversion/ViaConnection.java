@@ -184,7 +184,11 @@ public final class ViaConnection {
      */
     public void close() {
         synchronized (this.lock) {
-            Via.getManager().getConnectionManager().onDisconnect(this.user);
+            // Without a UUID (closed before login success) the connection was never registered,
+            // and onDisconnect would NPE on the null key.
+            if (this.user.getProtocolInfo().getUuid() != null) {
+                Via.getManager().getConnectionManager().onDisconnect(this.user);
+            }
             this.channel.finishAndReleaseAll();
         }
     }
